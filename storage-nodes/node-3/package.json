@@ -1,0 +1,16 @@
+{
+  "name": "storage-node-3",
+  "version": "1.0.0",
+  "description": "Distributed File Storage - Storage Node 3",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}

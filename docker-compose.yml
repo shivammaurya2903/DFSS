@@ -1,0 +1,102 @@
+version: "3.8"
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=development
+      - MONGODB_URI=mongodb://mongodb:27017/distributed_file_storage
+      - MONGODB_DATABASE=distributed_file_storage
+      - FRONTEND_URL=http://frontend:5173
+      - STORAGE_NODE_1_URL=http://storage-node-1:5001
+      - STORAGE_NODE_2_URL=http://storage-node-2:5002
+      - STORAGE_NODE_3_URL=http://storage-node-3:5003
+      - STORAGE_NODE_4_URL=http://storage-node-4:5004
+    depends_on:
+      - mongodb
+
+  mongodb:
+    image: mongo:7.0
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.runCommand('ping')", "--quiet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  storage-node-1:
+    build:
+      context: ./storage-nodes/node-1
+      dockerfile: Dockerfile
+    ports:
+      - "5001:5001"
+    environment:
+      - NODE_ENV=development
+      - STORAGE_NODE_ID=node-1
+      - STORAGE_PORT=5001
+      - STORAGE_MONGODB_URI=mongodb://mongodb:27017/distributed_file_storage
+    depends_on:
+      mongodb
+
+  storage-node-2:
+    build:
+      context: ./storage-nodes/node-2
+      dockerfile: Dockerfile
+    ports:
+      - "5002:5002"
+    environment:
+      - NODE_ENV=development
+      - STORAGE_NODE_ID=node-2
+      - STORAGE_PORT=5002
+      - STORAGE_MONGODB_URI=mongodb://mongodb:27017/distributed_file_storage
+    depends_on:
+      mongodb
+
+  storage-node-3:
+    build:
+      context: ./storage-nodes/node-3
+      dockerfile: Dockerfile
+    ports:
+      - "5003:5003"
+    environment:
+      - NODE_ENV=development
+      - STORAGE_NODE_ID=node-3
+      - STORAGE_PORT=5003
+      - STORAGE_MONGODB_URI=mongodb://mongodb:27017/distributed_file_storage
+    depends_on:
+      mongodb
+
+  storage-node-4:
+    build:
+      context: ./storage-nodes/node-4
+      dockerfile: Dockerfile
+    ports:
+      - "5004:5004"
+    environment:
+      - NODE_ENV=development
+      - STORAGE_NODE_ID=node-4
+      - STORAGE_PORT=5004
+      - STORAGE_MONGODB_URI=mongodb://mongodb:27017/distributed_file_storage
+    depends_on:
+      mongodb
+
+volumes:
+  mongodb_data:
