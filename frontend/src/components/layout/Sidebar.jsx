@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, Folder, Users, Star, Clock, Trash2, HardDrive, Activity, Settings, Cloud } from 'lucide-react';
 
@@ -86,3 +86,4 @@ const Sidebar = () => {
 };
 
 export default Sidebar;
+

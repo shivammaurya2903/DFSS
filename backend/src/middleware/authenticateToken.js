@@ -1,4 +1,4 @@
-const jwt = require("jsonwebtoken");
+﻿const jwt = require("jsonwebtoken");
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
@@ -11,7 +11,7 @@ const authenticateToken = (req, res, next) => {
     });
   }
 
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+  jwt.verify(token, require("../config").jwtSecret, (err, user) => {
     if (err) {
       if (err.name === "TokenExpiredError") {
         return res.status(401).json({

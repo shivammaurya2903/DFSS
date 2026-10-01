@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 
 const Button = ({ children, variant = 'primary', className = '', ...props }) => {
   const baseStyle = "px-4 py-2 rounded-lg font-medium transition-colors duration-200 flex items-center justify-center gap-2";
@@ -17,3 +17,4 @@ const Button = ({ children, variant = 'primary', className = '', ...props }) => 
 };
 
 export default Button;
+

@@ -1,13 +1,29 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Folder, MoreHorizontal, LayoutGrid, List, File, FileText, Image as ImageIcon, CheckSquare, Settings, Share2, Info, X } from 'lucide-react';
 import PageContainer from '../components/layout/PageContainer';
 import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
-import { folders, files } from '../utils/mockData';
+import * as fileService from '../services/file.service';
 
 const Dashboard = () => {
   const [viewMode, setViewMode] = useState('list');
   const [selectedFile, setSelectedFile] = useState(null);
+  const [folders, setFolders] = useState([]);
+  const [files, setFiles] = useState([]);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const filesData = await fileService.getFiles();
+        const foldersData = await fileService.getFolders();
+        setFiles(filesData);
+        setFolders(foldersData);
+      } catch (err) {
+        console.error('Error fetching data:', err);
+      }
+    };
+    loadData();
+  }, []);
 
   const getFileIcon = (type) => {
     switch (type) {
@@ -24,7 +40,7 @@ const Dashboard = () => {
       <PageContainer className="flex-1 overflow-x-hidden">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            My Files <span className="text-sm text-gray-400 mt-1 cursor-pointer">▼</span>
+            My Files <span className="text-sm text-gray-400 mt-1 cursor-pointer">â–¼</span>
           </h1>
         </div>
 
@@ -105,7 +121,7 @@ const Dashboard = () => {
                       <td className="px-6 py-4 text-gray-500">{file.date}</td>
                       <td className="px-6 py-4">
                         <div className="flex gap-2">
-                          {file.tags.map(tag => (
+                          {(file.tags || []).map(tag => (
                             <Badge key={tag} variant={tag === 'Work' ? 'blue' : tag === 'Important' ? 'orange' : 'purple'}>{tag}</Badge>
                           ))}
                         </div>
@@ -158,12 +174,12 @@ const Dashboard = () => {
                 {getFileIcon(selectedFile.type)}
               </div>
               <h3 className="font-medium text-center text-gray-800 px-2">{selectedFile.name}</h3>
-              <p className="text-xs text-gray-500 mt-1">{selectedFile.size} • {selectedFile.type}</p>
+              <p className="text-xs text-gray-500 mt-1">{selectedFile.size} â€¢ {selectedFile.type}</p>
             </div>
 
             <div className="flex gap-2 mb-6">
-              <Button variant="primary" className="flex-1 text-sm py-2">Open</Button>
-              <Button variant="outline" className="flex-1 text-sm py-2"><Share2 className="w-4 h-4" /> Share</Button>
+              <Button variant="primary" className="flex-1 text-sm py-2" onClick={() => window.open(selectedFile.url || '#', '_blank')}>Open</Button>
+              <Button variant="outline" className="flex-1 text-sm py-2" onClick={() => alert(`Share dialog for ${selectedFile.name}`)}><Share2 className="w-4 h-4" /> Share</Button>
             </div>
 
             <div className="space-y-6">
@@ -200,7 +216,7 @@ const Dashboard = () => {
                     <div className="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center text-xs text-purple-700 font-medium">AM</div>
                     <span className="text-gray-800">{selectedFile.owner} (Owner)</span>
                   </div>
-                  {selectedFile.sharedWith.map((person, i) => (
+                  {(selectedFile.sharedWith || []).map((person, i) => (
                     <div key={i} className="flex items-center gap-2 mb-2">
                       <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-xs text-blue-700 font-medium">{person.charAt(0)}</div>
                       <span className="text-gray-600">{person}</span>
@@ -217,3 +233,4 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
+

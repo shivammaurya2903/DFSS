@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 
 const Avatar = ({ src, alt = 'Avatar', fallback, className = '' }) => {
   return (
@@ -9,3 +9,4 @@ const Avatar = ({ src, alt = 'Avatar', fallback, className = '' }) => {
 };
 
 export default Avatar;
+

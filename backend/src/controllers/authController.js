@@ -1,4 +1,4 @@
-const User = require("../models/User");
+﻿const User = require("../models/User");
 const jwt = require("jsonwebtoken");
 
 const register = async (req, res) => {
@@ -23,8 +23,8 @@ const register = async (req, res) => {
 
     const token = jwt.sign(
       { userId: user._id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN }
+      require("../config").jwtSecret,
+      { expiresIn: require("../config").jwtExpiresIn }
     );
 
     res.status(201).json({
@@ -68,8 +68,8 @@ const login = async (req, res) => {
 
     const token = jwt.sign(
       { userId: user._id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN }
+      require("../config").jwtSecret,
+      { expiresIn: require("../config").jwtExpiresIn }
     );
 
     res.json({

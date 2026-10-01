@@ -54,7 +54,7 @@ services:
       - STORAGE_PORT=5001
       - STORAGE_MONGODB_URI=mongodb://mongodb:27017/distributed_file_storage
     depends_on:
-      mongodb
+      - mongodb
 
   storage-node-2:
     build:
@@ -68,7 +68,7 @@ services:
       - STORAGE_PORT=5002
       - STORAGE_MONGODB_URI=mongodb://mongodb:27017/distributed_file_storage
     depends_on:
-      mongodb
+      - mongodb
 
   storage-node-3:
     build:
@@ -82,7 +82,7 @@ services:
       - STORAGE_PORT=5003
       - STORAGE_MONGODB_URI=mongodb://mongodb:27017/distributed_file_storage
     depends_on:
-      mongodb
+      - mongodb
 
   storage-node-4:
     build:
@@ -96,7 +96,7 @@ services:
       - STORAGE_PORT=5004
       - STORAGE_MONGODB_URI=mongodb://mongodb:27017/distributed_file_storage
     depends_on:
-      mongodb
+      - mongodb
 
 volumes:
   mongodb_data:

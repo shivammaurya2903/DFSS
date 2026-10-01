@@ -9,11 +9,11 @@ const NodeDetails = () => {
   const [data, setData] = useState(null);
 
   useEffect(() => {
-    axios.get(`http://localhost:5000/api/storage/nodes/${nodeId}`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    })
-      .then(res => setData(res.data.data))
-      .catch(err => console.error(err));
+    import('../services/node.service').then(nodeService => {
+      nodeService.getNodeDetails(nodeId)
+        .then(res => setData(res))
+        .catch(err => console.error(err));
+    });
   }, [nodeId]);
 
   return (
@@ -37,3 +37,4 @@ const NodeDetails = () => {
 };
 
 export default NodeDetails;
+

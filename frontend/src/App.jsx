@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import MainLayout from './components/layout/MainLayout';
 import ProtectedRoute from './components/auth/ProtectedRoute';
@@ -14,15 +14,14 @@ import Expired from './pages/Expired';
 import NodeDetails from './pages/NodeDetails';
 import Settings from './pages/Settings';
 import Profile from './pages/Profile';
-import Login from './pages/Login';
-import Register from './pages/Register';
+import AuthPage from './pages/AuthPage';
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
+        <Route path="/login" element={<AuthPage />} />
+        <Route path="/register" element={<AuthPage />} />
         
         <Route element={<ProtectedRoute />}>
           <Route path="/" element={<MainLayout />}>

@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 
 const PageContainer = ({ children, className = '' }) => {
   return (
@@ -9,3 +9,4 @@ const PageContainer = ({ children, className = '' }) => {
 };
 
 export default PageContainer;
+

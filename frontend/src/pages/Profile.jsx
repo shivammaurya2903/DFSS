@@ -1,18 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import PageContainer from '../components/layout/PageContainer';
-import { User } from 'lucide-react';
-import axios from 'axios';
+import { User, LogOut } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import Button from '../components/common/Button';
 
 const Profile = () => {
-  const [user, setUser] = useState(null);
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    axios.get('http://localhost:5000/api/auth/me', {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    })
-      .then(res => setUser(res.data.user))
-      .catch(err => console.error(err));
-  }, []);
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
 
   return (
     <PageContainer>
@@ -20,13 +20,16 @@ const Profile = () => {
         <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
           <User className="text-purple-600" /> My Profile
         </h1>
+        <Button variant="outline" className="text-red-500 hover:bg-red-50 hover:text-red-600 border-red-200" onClick={handleLogout}>
+          <LogOut className="w-4 h-4" /> Logout
+        </Button>
       </div>
-      <div className="bg-white rounded-xl border border-gray-100 p-8 text-left text-gray-500">
+      <div className="bg-white rounded-xl border border-gray-100 p-8 text-left text-gray-700">
         {user ? (
-          <div>
-            <p><strong>Name:</strong> {user.name}</p>
-            <p><strong>Email:</strong> {user.email}</p>
-            <p><strong>Role:</strong> {user.role}</p>
+          <div className="space-y-3">
+            <p><strong className="text-gray-900">Name:</strong> {user.name}</p>
+            <p><strong className="text-gray-900">Email:</strong> {user.email}</p>
+            <p><strong className="text-gray-900">Role:</strong> {user.role}</p>
           </div>
         ) : 'Loading profile...'}
       </div>
@@ -35,3 +38,4 @@ const Profile = () => {
 };
 
 export default Profile;
+

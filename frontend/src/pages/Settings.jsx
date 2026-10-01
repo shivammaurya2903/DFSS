@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import PageContainer from '../components/layout/PageContainer';
 import { Settings as SettingsIcon } from 'lucide-react';
 
@@ -18,3 +18,4 @@ const Settings = () => {
 };
 
 export default Settings;
+
