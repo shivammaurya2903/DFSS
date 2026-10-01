@@ -1,0 +1,51 @@
+# See https://github.com/github/gitignore for more templates
+# Node
+node_modules/
+/pnpm-lock.yaml
+/yarn-lock
+/package-lock.lock
+
+# Environment Files
+.env
+
+# Production
+/dist
+/.next
+/out
+
+# Logs
+logs/
+*.log
+
+# Uploaded files
+/uploads
+/storage
+/data
+
+# Generated storage data
+**/storage-nodes/**/storage/
+
+# Docker
+.dockerinit
+*.docker-compose.yml.orig
+*.docker-compose.yml.dist
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Misc
+dist/
+build/
+.cache/
+.temp/
