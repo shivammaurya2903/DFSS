@@ -1,25 +1,57 @@
 import api from './api';
 
+/**
+ * File service — centralized file API calls.
+ * All requests go through the api client (which attaches JWT automatically).
+ */
+
 export const getFiles = async () => {
   const response = await api.get('/files');
-  return response.data;
+  return response.data?.data || [];
 };
 
-export const getFolders = async () => {
-  const response = await api.get('/folders');
-  return response.data;
+export const getFileDetails = async (fileId) => {
+  const response = await api.get(`/files/${fileId}`);
+  return response.data?.data || null;
 };
 
-export const uploadFile = async (fileData) => {
-  const response = await api.post('/files', fileData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
+export const uploadFile = async (formData, onUploadProgress) => {
+  const response = await api.post('/files/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 5 * 60 * 1000, // 5 min for large files
+    onUploadProgress,
   });
   return response.data;
 };
 
-export const deleteFile = async (id) => {
-  const response = await api.delete(`/files/${id}`);
+export const downloadFile = async (fileId, filename) => {
+  const response = await api.get(`/files/${fileId}/download`, {
+    responseType: 'blob',
+    timeout: 5 * 60 * 1000,
+  });
+  // Trigger browser download
+  const url = window.URL.createObjectURL(new Blob([response.data]));
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename || 'download');
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+  return { success: true };
+};
+
+export const deleteFile = async (fileId) => {
+  const response = await api.delete(`/files/${fileId}`);
   return response.data;
+};
+
+export const getRecentFiles = async () => {
+  const response = await api.get('/files/recent');
+  return response.data?.data || [];
+};
+
+export const getSharedFiles = async () => {
+  const response = await api.get('/files/shared');
+  return response.data?.data || [];
 };

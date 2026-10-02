@@ -1,138 +1,181 @@
 const File = require('../models/File');
 const Chunk = require('../models/Chunk');
-const CryptoJS = require('crypto-js');
-const axios = require('axios');
-const { PlacementStrategy } = require('./storageController');
+const AuditLog = require('../models/AuditLog');
+const StorageService = require('../services/StorageService');
+const StorageNode = require('../models/StorageNode');
+const UploadCoordinator = require('../services/UploadCoordinator');
+const DownloadCoordinator = require('../services/DownloadCoordinator');
 
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'default-encryption-key';
+/**
+ * FilesController
+ *
+ * Thin controller layer — delegates all business logic to coordinators/services.
+ * Responsible only for: HTTP request parsing, response formatting, error handling.
+ */
 
-const getFiles = async (req, res) => {
+// ─────────────────────────────────────────
+// LIST FILES
+// ─────────────────────────────────────────
+const getFiles = async (req, res, next) => {
   try {
-    const files = await File.find({ owner: req.user.id });
+    const files = await File.find({ owner: req.user.id })
+      .select('-chunks')
+      .sort({ createdAt: -1 });
+    res.json({ success: true, data: files });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─────────────────────────────────────────
+// UPLOAD FILE
+// ─────────────────────────────────────────
+const uploadFile = async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, code: 'INVALID_FILE', message: 'No file provided' });
+    }
+
+    console.log('[DEBUG] req.user:', req.user);
+
+    const result = await UploadCoordinator.upload({
+      fileData: req.file,
+      userId: req.user.id || req.user.userId,
+      requestId: req.requestId,
+      sensitivity: req.body.sensitivity || 'PRIVATE',
+      securityClass: req.body.securityClass || 'MEDIUM',
+      placementPolicy: req.body.placementPolicy || 'ADAPTIVE',
+      runId: req.body.runId || null,
+      scenarioId: req.body.scenarioId || null,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: result.file,
+      timings: result.timings,
+    });
+  } catch (err) {
+    err.message += ` | req.user was: ${JSON.stringify(req.user)}`;
+    next(err);
+  }
+};
+
+// ─────────────────────────────────────────
+// GET FILE DETAILS
+// ─────────────────────────────────────────
+const getFileDetails = async (req, res, next) => {
+  try {
+    const file = await File.findOne({
+      _id: req.params.fileId,
+      owner: req.user.id,
+    }).populate('chunks');
+
+    if (!file) {
+      return res.status(404).json({ success: false, code: 'FILE_NOT_FOUND', message: 'File not found' });
+    }
+
+    res.json({ success: true, data: file });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─────────────────────────────────────────
+// DOWNLOAD FILE
+// ─────────────────────────────────────────
+const downloadFile = async (req, res, next) => {
+  try {
+    await DownloadCoordinator.download({
+      fileId: req.params.fileId,
+      userId: req.user.id,
+      requestId: req.requestId,
+      res,
+    });
+    // Response already sent by DownloadCoordinator
+  } catch (err) {
+    if (!res.headersSent) {
+      next(err);
+    }
+  }
+};
+
+// ─────────────────────────────────────────
+// DELETE FILE
+// ─────────────────────────────────────────
+const deleteFile = async (req, res, next) => {
+  try {
+    const file = await File.findOne({
+      _id: req.params.fileId,
+      owner: req.user.id,
+    }).populate('chunks');
+
+    if (!file) {
+      return res.status(404).json({ success: false, code: 'FILE_NOT_FOUND', message: 'File not found' });
+    }
+
+    // Delete chunks from all storage nodes
+    const errors = [];
+    for (const chunk of file.chunks) {
+      const allNodeIds = [chunk.primaryNode, ...(chunk.replicaNodes || [])];
+      for (const nodeId of allNodeIds) {
+        try {
+          const url = StorageService.getNodeUrl(nodeId) ||
+                      await StorageService.getNodeUrlFromDB(nodeId);
+          if (url) {
+            await StorageService.deleteChunk(url, chunk.chunkId);
+          }
+        } catch (err) {
+          errors.push(`Node ${nodeId} chunk ${chunk.chunkId}: ${err.message}`);
+        }
+      }
+      await Chunk.findByIdAndDelete(chunk._id);
+    }
+
+    await File.findByIdAndDelete(file._id);
+
+    // Audit log
+    await AuditLog.create({
+      requestId: req.requestId,
+      userId: req.user.id,
+      action: 'DELETE',
+      status: errors.length === 0 ? 'SUCCESS' : 'FAILURE',
+      fileId: file._id,
+      reason: errors.length > 0 ? errors.join('; ') : undefined,
+    }).catch(() => {});
+
+    res.json({
+      success: true,
+      message: 'File deleted successfully',
+      ...(errors.length > 0 && { warnings: errors }),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─────────────────────────────────────────
+// STUB ROUTES (to be implemented)
+// ─────────────────────────────────────────
+const getShared = async (req, res) =>
+  res.json({ success: true, data: [], message: 'Sharing not yet implemented' });
+
+const getFavorites = async (req, res) =>
+  res.json({ success: true, data: [], message: 'Favorites not yet implemented' });
+
+const getRecent = async (req, res) => {
+  try {
+    const files = await File.find({ owner: req.user.id, status: 'READY' })
+      .select('-chunks')
+      .sort({ updatedAt: -1 })
+      .limit(10);
     res.json({ success: true, data: files });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
-const getShared = async (req, res) => res.json({ success: true, data: [] });
-const getFavorites = async (req, res) => res.json({ success: true, data: [] });
-const getRecent = async (req, res) => res.json({ success: true, data: [] });
-const getExpired = async (req, res) => res.json({ success: true, data: [] });
-
-const uploadFile = async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ success: false, message: 'No file provided' });
-    
-    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
-    const fileBuffer = req.file.buffer;
-    const totalChunks = Math.ceil(fileBuffer.length / CHUNK_SIZE);
-    
-    const fileDoc = new File({
-      filename: req.body.filename || req.file.originalname,
-      originalName: req.file.originalname,
-      owner: req.user.id,
-      size: req.file.size,
-      mimeType: req.file.mimetype,
-      status: 'UPLOADING'
-    });
-    
-    await fileDoc.save();
-    
-    const chunkDocs = [];
-    
-    for (let i = 0; i < totalChunks; i++) {
-      const chunkData = fileBuffer.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-      const encryptedData = CryptoJS.AES.encrypt(chunkData.toString('base64'), ENCRYPTION_KEY).toString();
-      
-      const checksum = CryptoJS.SHA256(encryptedData).toString();
-      
-      const targetNodes = await PlacementStrategy.getTargets('Adaptive', encryptedData.length, 2);
-      
-      // Upload to target nodes
-      for (const node of targetNodes) {
-        await axios.post(`${node.url}/upload`, {
-          chunkId: `${fileDoc._id}_${i}`,
-          data: encryptedData,
-          checksum
-        });
-      }
-      
-      const chunkDoc = new Chunk({
-        fileId: fileDoc._id,
-        sequenceNumber: i,
-        size: chunkData.length,
-        checksum,
-        primaryNode: targetNodes[0].nodeId,
-        replicaNodes: targetNodes.slice(1).map(n => n.nodeId)
-      });
-      
-      await chunkDoc.save();
-      chunkDocs.push(chunkDoc._id);
-    }
-    
-    fileDoc.chunks = chunkDocs;
-    fileDoc.status = 'READY';
-    await fileDoc.save();
-    
-    res.json({ success: true, data: fileDoc });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-const getFileDetails = async (req, res) => {
-  try {
-    const file = await File.findOne({ _id: req.params.fileId, owner: req.user.id }).populate('chunks');
-    if (!file) return res.status(404).json({ success: false, message: 'File not found' });
-    res.json({ success: true, data: file });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-const downloadFile = async (req, res) => {
-  try {
-    const file = await File.findOne({ _id: req.params.fileId, owner: req.user.id }).populate('chunks');
-    if (!file) return res.status(404).json({ success: false, message: 'File not found' });
-    
-    const chunks = file.chunks.sort((a, b) => a.sequenceNumber - b.sequenceNumber);
-    let fileBuffer = Buffer.alloc(0);
-    
-    for (const chunk of chunks) {
-      // For simplicity, mocking download from node. In real world, we'd fetch from node.url/download/:chunkId
-      const targetNodeId = chunk.primaryNode; // Should look up node URL
-      // Mock data fetching, here we just show logic.
-      // const response = await axios.get(`${nodeUrl}/download/${file._id}_${chunk.sequenceNumber}`);
-      // const decryptedData = CryptoJS.AES.decrypt(response.data.data, ENCRYPTION_KEY).toString(CryptoJS.enc.Utf8);
-      // fileBuffer = Buffer.concat([fileBuffer, Buffer.from(decryptedData, 'base64')]);
-    }
-    
-    res.setHeader('Content-disposition', `attachment; filename=${file.originalName}`);
-    res.setHeader('Content-type', file.mimeType);
-    res.send(fileBuffer);
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-const deleteFile = async (req, res) => {
-  try {
-    const file = await File.findOne({ _id: req.params.fileId, owner: req.user.id }).populate('chunks');
-    if (!file) return res.status(404).json({ success: false, message: 'File not found' });
-    
-    for (const chunk of file.chunks) {
-      // Mock delete request to storage nodes
-      // await axios.delete(`${nodeUrl}/delete/${file._id}_${chunk.sequenceNumber}`);
-      await Chunk.findByIdAndDelete(chunk._id);
-    }
-    
-    await File.findByIdAndDelete(file._id);
-    res.json({ success: true, message: 'File deleted successfully' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
+const getExpired = async (req, res) =>
+  res.json({ success: true, data: [], message: 'Expired shares not yet implemented' });
 
 module.exports = {
   getFiles,
@@ -143,5 +186,5 @@ module.exports = {
   uploadFile,
   getFileDetails,
   downloadFile,
-  deleteFile
+  deleteFile,
 };

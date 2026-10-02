@@ -1,6 +1,23 @@
 version: "3.8"
 
+# =============================================================
+# DISTRIBUTED FILE STORAGE SYSTEM — Docker Compose
+#
+# PHYSICAL LIMITATION (documented per architecture requirement):
+# All four storage nodes share ONE physical HDD (LOCAL-HDD domain).
+# This is a prototype demonstrating distributed software architecture
+# with logical node placement, replication, recovery, and research.
+# It does NOT provide independent physical disk failure domains.
+#
+# HDD storage root: D:\DistributedStorage
+# Set STORAGE_ROOT in .env to customize.
+# =============================================================
+
 services:
+
+  # ─────────────────────────────────────────
+  # FRONTEND
+  # ─────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
@@ -8,10 +25,14 @@ services:
     ports:
       - "5173:5173"
     environment:
+      - VITE_API_BASE_URL=http://localhost:5000/api
       - CHOKIDAR_USEPOLLING=true
     depends_on:
       - backend
 
+  # ─────────────────────────────────────────
+  # BACKEND
+  # ─────────────────────────────────────────
   backend:
     build:
       context: ./backend
@@ -19,17 +40,41 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
+      - BACKEND_HOST=0.0.0.0
+      - BACKEND_PORT=5000
       - MONGODB_URI=mongodb://mongodb:27017/distributed_file_storage
       - MONGODB_DATABASE=distributed_file_storage
       - FRONTEND_URL=http://frontend:5173
+      - CORS_ORIGINS=http://localhost:5173,http://frontend:5173
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=1d
+      - BCRYPT_SALT_ROUNDS=12
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
       - STORAGE_NODE_1_URL=http://storage-node-1:5001
       - STORAGE_NODE_2_URL=http://storage-node-2:5002
       - STORAGE_NODE_3_URL=http://storage-node-3:5003
       - STORAGE_NODE_4_URL=http://storage-node-4:5004
+      - STORAGE_ROOT=/distributed-storage
+      - CHUNK_SIZE_MB=10
+      - REPLICATION_FACTOR=2
+      - PARALLEL_DOWNLOADS=2
+      - HEARTBEAT_INTERVAL_MS=5000
+      - HEARTBEAT_TIMEOUT_MS=15000
+      - STORAGE_REQUEST_TIMEOUT_MS=10000
+      - STORAGE_UPLOAD_TIMEOUT_MS=60000
+      - STORAGE_HEALTH_TIMEOUT_MS=5000
+      - LOG_LEVEL=info
+      - RESEARCH_MODE=false
     depends_on:
-      - mongodb
+      mongodb:
+        condition: service_healthy
 
+  # ─────────────────────────────────────────
+  # MONGODB (Control Plane / Metadata)
+  # Does NOT store actual file content.
+  # ─────────────────────────────────────────
   mongodb:
     image: mongo:7.0
     ports:
@@ -42,6 +87,11 @@ services:
       timeout: 5s
       retries: 5
 
+  # ─────────────────────────────────────────
+  # STORAGE NODES (Data Plane)
+  # Each mounts its own subdirectory of the host HDD.
+  # Note: all share ONE physical HDD in this prototype.
+  # ─────────────────────────────────────────
   storage-node-1:
     build:
       context: ./storage-nodes/node-1
@@ -49,12 +99,19 @@ services:
     ports:
       - "5001:5001"
     environment:
-      - NODE_ENV=development
       - STORAGE_NODE_ID=node-1
       - STORAGE_PORT=5001
-      - STORAGE_MONGODB_URI=mongodb://mongodb:27017/distributed_file_storage
+      - STORAGE_DIR=/data
+      - BACKEND_URL=http://backend:5000
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
+      - HEARTBEAT_INTERVAL_MS=5000
+      - NODE_HOST=storage-node-1
+    volumes:
+      - type: bind
+        source: ${STORAGE_ROOT:-D:/DistributedStorage}/node-1
+        target: /data
     depends_on:
-      - mongodb
+      - backend
 
   storage-node-2:
     build:
@@ -63,12 +120,19 @@ services:
     ports:
       - "5002:5002"
     environment:
-      - NODE_ENV=development
       - STORAGE_NODE_ID=node-2
       - STORAGE_PORT=5002
-      - STORAGE_MONGODB_URI=mongodb://mongodb:27017/distributed_file_storage
+      - STORAGE_DIR=/data
+      - BACKEND_URL=http://backend:5000
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
+      - HEARTBEAT_INTERVAL_MS=5000
+      - NODE_HOST=storage-node-2
+    volumes:
+      - type: bind
+        source: ${STORAGE_ROOT:-D:/DistributedStorage}/node-2
+        target: /data
     depends_on:
-      - mongodb
+      - backend
 
   storage-node-3:
     build:
@@ -77,12 +141,19 @@ services:
     ports:
       - "5003:5003"
     environment:
-      - NODE_ENV=development
       - STORAGE_NODE_ID=node-3
       - STORAGE_PORT=5003
-      - STORAGE_MONGODB_URI=mongodb://mongodb:27017/distributed_file_storage
+      - STORAGE_DIR=/data
+      - BACKEND_URL=http://backend:5000
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
+      - HEARTBEAT_INTERVAL_MS=5000
+      - NODE_HOST=storage-node-3
+    volumes:
+      - type: bind
+        source: ${STORAGE_ROOT:-D:/DistributedStorage}/node-3
+        target: /data
     depends_on:
-      - mongodb
+      - backend
 
   storage-node-4:
     build:
@@ -91,12 +162,20 @@ services:
     ports:
       - "5004:5004"
     environment:
-      - NODE_ENV=development
       - STORAGE_NODE_ID=node-4
       - STORAGE_PORT=5004
-      - STORAGE_MONGODB_URI=mongodb://mongodb:27017/distributed_file_storage
+      - STORAGE_DIR=/data
+      - BACKEND_URL=http://backend:5000
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
+      - HEARTBEAT_INTERVAL_MS=5000
+      - NODE_HOST=storage-node-4
+    volumes:
+      - type: bind
+        source: ${STORAGE_ROOT:-D:/DistributedStorage}/node-4
+        target: /data
     depends_on:
-      - mongodb
+      - backend
 
 volumes:
   mongodb_data:
+    driver: local

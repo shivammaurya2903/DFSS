@@ -10,7 +10,7 @@ const Storage = () => {
     const loadNodes = async () => {
       try {
         const data = await nodeService.getNodes();
-        setNodes(data || []);
+        setNodes(Array.isArray(data) ? data : []);
       } catch (err) {
         console.error('Error fetching nodes:', err);
       }

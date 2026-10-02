@@ -49,3 +49,7 @@ dist/
 build/
 .cache/
 .temp/
+
+
+#docs
+/docs/

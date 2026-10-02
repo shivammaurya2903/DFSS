@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import PageContainer from '../components/layout/PageContainer';
 import { Star } from 'lucide-react';
 import axios from 'axios';
@@ -12,7 +12,7 @@ const Favorites = () => {
     axios.get(`\$\{import.meta.env.VITE_API_URL\}/files/favorites`, {
       headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
     })
-      .then(res => setData(res.data.data))
+      .then(res => setData(res.data?.data || []))
       .catch(err => console.error(err));
   }, []);
 

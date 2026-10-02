@@ -1,4 +1,4 @@
-﻿const User = require("../models/User");
+const User = require("../models/User");
 const jwt = require("jsonwebtoken");
 
 const register = async (req, res) => {
@@ -39,6 +39,14 @@ const register = async (req, res) => {
       },
     });
   } catch (error) {
+    console.error("Register Error:", error);
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(val => val.message);
+      return res.status(400).json({
+        success: false,
+        message: messages.join(', '),
+      });
+    }
     res.status(500).json({
       success: false,
       message: "Internal server error",

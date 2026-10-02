@@ -9,7 +9,7 @@ const Activity = () => {
     const loadActivities = async () => {
       try {
         const data = await activityService.getActivities();
-        setActivities(data || []);
+        setActivities(Array.isArray(data) ? data : []);
       } catch (err) {
         console.error('Error fetching activities:', err);
       }
