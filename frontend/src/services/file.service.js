@@ -5,8 +5,8 @@ import api from './api';
  * All requests go through the api client (which attaches JWT automatically).
  */
 
-export const getFiles = async () => {
-  const response = await api.get('/files');
+export const getFiles = async (options = {}) => {
+  const response = await api.get('/files', options);
   return response.data?.data || [];
 };
 
@@ -39,6 +39,14 @@ export const downloadFile = async (fileId, filename) => {
   link.remove();
   window.URL.revokeObjectURL(url);
   return { success: true };
+};
+
+export const getFileBlob = async (fileId) => {
+  const response = await api.get(`/files/${fileId}/download`, {
+    responseType: 'blob',
+    timeout: 5 * 60 * 1000,
+  });
+  return response.data;
 };
 
 export const deleteFile = async (fileId) => {

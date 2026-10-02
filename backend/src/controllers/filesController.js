@@ -1,4 +1,5 @@
 const File = require('../models/File');
+const ShareToken = require('../models/ShareToken');
 const Chunk = require('../models/Chunk');
 const AuditLog = require('../models/AuditLog');
 const StorageService = require('../services/StorageService');
@@ -36,7 +37,7 @@ const uploadFile = async (req, res, next) => {
       return res.status(400).json({ success: false, code: 'INVALID_FILE', message: 'No file provided' });
     }
 
-    console.log('[DEBUG] req.user:', req.user);
+    // debug removed
 
     const result = await UploadCoordinator.upload({
       fileData: req.file,
@@ -55,7 +56,7 @@ const uploadFile = async (req, res, next) => {
       timings: result.timings,
     });
   } catch (err) {
-    err.message += ` | req.user was: ${JSON.stringify(req.user)}`;
+
     next(err);
   }
 };
@@ -133,6 +134,14 @@ const deleteFile = async (req, res, next) => {
 
     await File.findByIdAndDelete(file._id);
 
+    // Delete share tokens
+    await ShareToken.deleteMany({ fileId: file._id });
+
+    // Release Quota
+    const User = require('../models/User');
+    const storedSize = file.storedSize || file.size;
+    await User.findByIdAndUpdate(req.user.id, { $inc: { usedStorage: -storedSize } });
+
     // Audit log
     await AuditLog.create({
       requestId: req.requestId,
@@ -188,3 +197,4 @@ module.exports = {
   downloadFile,
   deleteFile,
 };
+

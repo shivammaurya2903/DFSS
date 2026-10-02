@@ -86,3 +86,10 @@ This project implements the foundation Phase 1 of a distributed file storage sys
 - [ ] Project structure is clean
 - [ ] Documentation exists
 - [ ] No secrets are committed
+## Phase 0 - 43 Audit & Repair
+- Fully audited the codebase.
+- Connected frontend directly to backend APIs (removed mock data).
+- Fixed complete authentication, file lifecycle, and deletion operations.
+- Resolved storage quota and accounting logic.
+- Hardened security and IDOR checks.
+- Created documentation in docs/.

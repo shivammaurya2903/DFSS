@@ -1,19 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import PageContainer from '../components/layout/PageContainer';
 import { Star } from 'lucide-react';
-import axios from 'axios';
+import api from '../services/api';
 import EmptyState from '../components/common/EmptyState';
 
 const Favorites = () => {
   const [data, setData] = useState([]);
 
   useEffect(() => {
-    // In a real app we'd use a generic configured axios instance
-    axios.get(`\$\{import.meta.env.VITE_API_URL\}/files/favorites`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    })
+    const controller = new AbortController();
+    api.get(`/files/favorites`, { signal: controller.signal })
       .then(res => setData(res.data?.data || []))
-      .catch(err => console.error(err));
+      .catch(err => {
+        if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') return;
+        console.error(err);
+      });
+    return () => controller.abort();
   }, []);
 
   return (

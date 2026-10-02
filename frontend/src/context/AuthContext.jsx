@@ -8,11 +8,20 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const currentUser = authService.getCurrentUser();
-    if (currentUser) {
-      setUser(currentUser);
-    }
-    setLoading(false);
+    const initAuth = async () => {
+      const localUser = authService.getCurrentUser();
+      if (localUser) {
+        setUser(localUser);
+        try {
+          const freshUser = await authService.fetchMe();
+          setUser(freshUser);
+        } catch (err) {
+          console.error("Failed to fetch fresh user data", err);
+        }
+      }
+      setLoading(false);
+    };
+    initAuth();
   }, []);
 
   const login = async (email, password) => {
@@ -32,8 +41,15 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
   };
 
+  const refreshUser = async () => {
+    try {
+      const freshUser = await authService.fetchMe();
+      setUser(freshUser);
+    } catch (err) {}
+  };
+
   return (
-    <AuthContext.Provider value={{ user, login, register, logout, loading }}>
+    <AuthContext.Provider value={{ user, login, register, logout, loading, refreshUser }}>
       {!loading && children}
     </AuthContext.Provider>
   );

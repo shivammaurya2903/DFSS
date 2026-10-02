@@ -29,6 +29,18 @@ const UserSchema = new mongoose.Schema({
     enum: ["user", "admin"],
     default: "user",
   },
+  usedStorage: {
+    type: Number,
+    default: 0,
+  },
+  reservedStorage: {
+    type: Number,
+    default: 0,
+  },
+  storageQuota: {
+    type: Number,
+    default: 100 * 1024 * 1024, // 100 MB default
+  },
   createdAt: {
     type: Date,
     default: Date.now,

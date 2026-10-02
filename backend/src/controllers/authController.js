@@ -36,6 +36,8 @@ const register = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        usedStorage: user.usedStorage,
+        storageQuota: user.storageQuota,
       },
     });
   } catch (error) {
@@ -89,6 +91,8 @@ const login = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        usedStorage: user.usedStorage,
+        storageQuota: user.storageQuota,
       },
     });
   } catch (error) {
@@ -101,7 +105,7 @@ const login = async (req, res) => {
 
 const getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId).select("-password");
+    const user = await User.findById(req.user.userId || req.user.id).select("-password");
     res.json({
       success: true,
       user: {
@@ -109,6 +113,8 @@ const getMe = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        usedStorage: user.usedStorage,
+        storageQuota: user.storageQuota,
       },
     });
   } catch (error) {

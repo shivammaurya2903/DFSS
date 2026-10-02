@@ -8,12 +8,11 @@ RUN npm install --production
 
 COPY . .
 
+# These defaults are overridden by docker-compose environment variables
 ENV STORAGE_NODE_ID=node-1
 ENV STORAGE_PORT=5001
-ENV STORAGE_DIR=/data/storage
+ENV STORAGE_DIR=/data
 
 EXPOSE 5001
-
-VOLUME ["/data/storage"]
 
 CMD ["node", "src/index.js"]

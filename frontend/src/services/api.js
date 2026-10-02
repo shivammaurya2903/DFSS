@@ -27,6 +27,11 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (axios.isCancel(error)) {
+      error.isCanceled = true;
+      return Promise.reject(error);
+    }
+    
     if (!error.response) {
       // Network error / backend unreachable
       error.isNetworkError = true;

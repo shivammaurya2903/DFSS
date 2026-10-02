@@ -1,7 +1,7 @@
 import api from './api';
 
-export const getNodes = async () => {
-  const response = await api.get('/storage/nodes');
+export const getNodes = async (options = {}) => {
+  const response = await api.get('/storage/nodes', options);
   return response.data?.data || [];
 };
 

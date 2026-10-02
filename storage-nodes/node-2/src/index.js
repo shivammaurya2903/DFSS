@@ -49,6 +49,30 @@ app.use((req, res, next) => {
 });
 
 // ─────────────────────────────────────────
+// INTERNAL API AUTHENTICATION
+// All /internal/* routes require x-internal-token header.
+// This prevents unauthorized chunk access.
+// ─────────────────────────────────────────
+const authenticateInternal = (req, res, next) => {
+  // Health endpoint is public for Docker healthchecks
+  if (req.path === '/internal/health') return next();
+  
+  const token = req.headers['x-internal-token'];
+  if (!token || !INTERNAL_SECRET) {
+    return res.status(401).json({ error: 'Internal authentication required' });
+  }
+  // Constant-time comparison to prevent timing attacks
+  const tokenBuf = Buffer.from(token);
+  const secretBuf = Buffer.from(INTERNAL_SECRET);
+  if (tokenBuf.length !== secretBuf.length || !crypto.timingSafeEqual(tokenBuf, secretBuf)) {
+    return res.status(403).json({ error: 'Invalid internal token' });
+  }
+  next();
+};
+
+app.use('/internal', authenticateInternal);
+
+// ─────────────────────────────────────────
 // CHUNK ID SANITIZATION
 // Prevents path traversal attacks.
 // chunkId must match safe pattern only.
@@ -113,6 +137,16 @@ app.post('/internal/chunks', upload.single('chunk'), async (req, res) => {
     if (stats.size !== req.file.size) {
       fs.unlinkSync(tempPath);
       return res.status(400).json({ error: 'Chunk size mismatch — upload may be corrupt' });
+    }
+
+    // Verify checksum if provided
+    if (expectedChecksum) {
+      const fileBuffer = fs.readFileSync(tempPath);
+      const actualChecksum = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+      if (actualChecksum !== expectedChecksum) {
+        fs.unlinkSync(tempPath);
+        return res.status(400).json({ error: 'Chunk checksum mismatch — data corrupt', expected: expectedChecksum, actual: actualChecksum });
+      }
     }
 
     // Atomic rename: temp → final location
@@ -271,6 +305,10 @@ const sendHeartbeat = async () => {
     );
   } catch (err) {
     console.error(`[${NODE_ID}] Heartbeat failed: ${err.message}`);
+    if (err.response && err.response.status === 404) {
+      console.log(`[${NODE_ID}] Backend requested registration. Re-registering...`);
+      registerWithBackend();
+    }
   }
 };
 

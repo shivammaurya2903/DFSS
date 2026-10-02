@@ -32,13 +32,44 @@ const fileSchema = new mongoose.Schema({
     required: true,
     min: 0,
   },
+  originalSize: {
+    type: Number,
+    min: 0,
+  },
+  storedSize: {
+    type: Number,
+    min: 0,
+  },
   mimeType: {
     type: String,
     required: true,
   },
-  checksum: {
-    // SHA-256 of the ORIGINAL unencrypted file content
+  originalMimeType: {
     type: String,
+  },
+  originalFileName: {
+    type: String,
+  },
+  checksum: {
+    // SHA-256 of the stored file content
+    type: String,
+  },
+  originalSha256: {
+    type: String,
+  },
+  compressionApplied: {
+    type: Boolean,
+    default: false,
+  },
+  compressionAlgorithm: {
+    type: String,
+  },
+  compressionRatio: {
+    type: Number,
+  },
+  spaceSavedBytes: {
+    type: Number,
+    default: 0,
   },
   encryptionInfo: {
     algorithm: { type: String, default: 'AES-256-CBC' },

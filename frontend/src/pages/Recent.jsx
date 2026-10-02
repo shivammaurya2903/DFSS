@@ -1,18 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import PageContainer from '../components/layout/PageContainer';
 import { Clock } from 'lucide-react';
-import axios from 'axios';
+import api from '../services/api';
 import EmptyState from '../components/common/EmptyState';
 
 const Recent = () => {
   const [data, setData] = useState([]);
 
   useEffect(() => {
-    axios.get(`\$\{import.meta.env.VITE_API_URL\}/files/recent`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    })
+    const controller = new AbortController();
+    api.get(`/files/recent`, { signal: controller.signal })
       .then(res => setData(res.data?.data || []))
-      .catch(err => console.error(err));
+      .catch(err => {
+        if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') return;
+        console.error(err);
+      });
+    return () => controller.abort();
   }, []);
 
   return (

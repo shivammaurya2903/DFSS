@@ -1,4 +1,5 @@
 const config = require('../config');
+const crypto = require('crypto');
 
 /**
  * Middleware to validate internal API calls from storage nodes.
@@ -17,7 +18,9 @@ const validateInternalToken = (req, res, next) => {
     });
   }
 
-  if (token !== config.internalApiSecret) {
+  const tokenBuf = Buffer.from(String(token));
+  const secretBuf = Buffer.from(String(config.internalApiSecret));
+  if (tokenBuf.length !== secretBuf.length || !crypto.timingSafeEqual(tokenBuf, secretBuf)) {
     return res.status(403).json({
       success: false,
       code: 'INTERNAL_AUTH_INVALID',

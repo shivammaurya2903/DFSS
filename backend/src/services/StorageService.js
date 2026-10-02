@@ -37,6 +37,7 @@ const StorageService = {
           ...form.getHeaders(),
           'x-chunk-id': chunkId,
           'x-checksum': checksum,
+          'x-internal-token': config.internalApiSecret,
         },
         timeout: config.storageUploadTimeoutMs,
         maxContentLength: Infinity,
@@ -62,6 +63,7 @@ const StorageService = {
     const response = await axios.get(`${nodeUrl}/internal/chunks/${encodeURIComponent(chunkId)}`, {
       responseType: 'arraybuffer',
       timeout: config.storageRequestTimeoutMs,
+      headers: { 'x-internal-token': config.internalApiSecret },
     });
     return Buffer.from(response.data);
   },
@@ -77,6 +79,7 @@ const StorageService = {
     try {
       await axios.head(`${nodeUrl}/internal/chunks/${encodeURIComponent(chunkId)}`, {
         timeout: config.storageHealthTimeoutMs,
+        headers: { 'x-internal-token': config.internalApiSecret },
       });
       return true;
     } catch (err) {
@@ -95,7 +98,7 @@ const StorageService = {
   async deleteChunk(nodeUrl, chunkId) {
     const response = await axios.delete(
       `${nodeUrl}/internal/chunks/${encodeURIComponent(chunkId)}`,
-      { timeout: config.storageRequestTimeoutMs }
+      { timeout: config.storageRequestTimeoutMs, headers: { 'x-internal-token': config.internalApiSecret } }
     );
     return response.data;
   },
@@ -122,6 +125,7 @@ const StorageService = {
   async getNodeMetrics(nodeUrl) {
     const response = await axios.get(`${nodeUrl}/internal/metrics`, {
       timeout: config.storageHealthTimeoutMs,
+      headers: { 'x-internal-token': config.internalApiSecret },
     });
     return response.data;
   },

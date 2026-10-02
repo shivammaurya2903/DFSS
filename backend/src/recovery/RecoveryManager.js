@@ -145,7 +145,21 @@ const RecoveryManager = {
     );
 
     if (!replacementNode) {
-      throw new Error(`No replacement node available for chunk ${chunk.chunkId}`);
+      console.warn(`[RecoveryManager] No replacement node available for chunk ${chunk.chunkId}, leaving degraded.`);
+      const updateFields = { status: 'DEGRADED' };
+      if (chunk.primaryNode === failedNodeId) {
+        const newPrimary = chunk.replicaNodes.find(id => id !== failedNodeId);
+        if (newPrimary) {
+          updateFields.primaryNode = newPrimary;
+          updateFields.replicaNodes = chunk.replicaNodes.filter(id => id !== failedNodeId && id !== newPrimary);
+        } else {
+          throw new Error(`No primary candidate available`);
+        }
+      } else {
+        updateFields.replicaNodes = chunk.replicaNodes.filter(id => id !== failedNodeId);
+      }
+      await Chunk.findByIdAndUpdate(chunk._id, updateFields);
+      return;
     }
 
     const replacementUrl = replacementNode.url || StorageService.getNodeUrl(replacementNode.nodeId);

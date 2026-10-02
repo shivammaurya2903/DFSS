@@ -36,9 +36,9 @@ describe('Storage Controller', () => {
   });
 
   test('should return list of nodes', async () => {
-    StorageNode.find.mockResolvedValue([
+    StorageNode.find.mockReturnValue({ select: jest.fn().mockResolvedValue([
       { nodeId: 'node-1', status: 'HEALTHY' }
-    ]);
+    ]) });
 
     const res = await request(app).get('/api/storage/nodes');
 
@@ -47,3 +47,4 @@ describe('Storage Controller', () => {
     expect(res.body.data.length).toBe(1);
   });
 });
+
