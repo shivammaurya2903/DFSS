@@ -168,10 +168,39 @@ const getSystemMetrics = async (req, res, next) => {
   }
 };
 
+const getPlacementDebug = async (req, res, next) => {
+  try {
+    const nodes = await StorageNode.find();
+    res.json({
+      success: true,
+      data: {
+        totalNodes: nodes.length,
+        eligibleCount: nodes.filter(n => n.status === 'HEALTHY').length,
+        nodes: nodes.map(n => ({
+          nodeId: n.nodeId,
+          status: n.status,
+          capacity: n.capacity,
+          freeSpace: n.freeSpace,
+          failureDomainId: n.failureDomainId,
+          securityCapabilities: n.securityCapabilities,
+          lastHeartbeat: n.lastHeartbeat,
+        })),
+        config: {
+          weights: require('../config').placementWeights,
+          replicationFactor: require('../config').replicationFactor,
+        }
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getNodes,
   getNodeDetails,
   registerNode,
   heartbeat,
   getSystemMetrics,
+  getPlacementDebug,
 };

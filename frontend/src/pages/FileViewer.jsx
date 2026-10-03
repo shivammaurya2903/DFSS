@@ -37,7 +37,7 @@ const FileViewer = () => {
         }
       } catch (err) {
         console.error('View error:', err);
-        setError('Failed to load file for viewing.');
+        setError(err.userMessage || err.message || 'Failed to load file for viewing.');
       } finally {
         setLoading(false);
       }

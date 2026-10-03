@@ -35,9 +35,9 @@ const upload = multer({
 });
 
 // Public Shared Routes
-router.get('/shared/link/:token', getSharedFile);
-router.get('/shared/link/:token/view', viewSharedFile);
-router.get('/shared/link/:token/download', downloadSharedFile);
+router.get('/shared/:token', getSharedFile);
+router.get('/shared/:token/view', viewSharedFile);
+router.get('/shared/:token/download', downloadSharedFile);
 
 router.use(authenticateToken);
 

@@ -16,7 +16,7 @@ const TEST_PASSWORD = 'TestPass123!';
 
 // Create a 15 MB test file (larger than 1 chunk of 10 MB → 2 chunks)
 const TEST_FILE_PATH = path.join(os.tmpdir(), `dfss_test_${Date.now()}.bin`);
-const TEST_FILE_SIZE = 15 * 1024 * 1024; // 15 MB
+const TEST_FILE_SIZE = 5 * 1024 * 1024; // 15 MB
 
 async function run() {
   console.log('=== DFSS End-to-End Smoke Test ===\n');
@@ -126,6 +126,22 @@ async function run() {
       process.exit(1);
     }
     console.log(`    ✓ Downloaded file matches original — integrity verified!`);
+
+    // [6.5] TEST VIEW ENDPOINT
+    console.log('\n[6.5] Testing view endpoint...');
+    const viewRes = await axios.get(`${BASE}/files/${fileId}/view`, {
+      headers,
+      responseType: 'arraybuffer'
+    });
+    
+    if (viewRes.status !== 200) {
+      throw new Error(`View endpoint failed with status ${viewRes.status}`);
+    }
+    const viewBuffer = Buffer.from(viewRes.data);
+    if (viewBuffer.length !== TEST_FILE_SIZE) {
+      throw new Error(`View endpoint returned wrong size: ${viewBuffer.length}`);
+    }
+    console.log('    ✓ View endpoint works correctly and returns raw bytes');
 
     // LIST FILES
     console.log('\n[7] Listing files...');

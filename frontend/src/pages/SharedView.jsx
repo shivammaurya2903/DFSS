@@ -13,8 +13,8 @@ const SharedView = () => {
     const loadSharedData = async () => {
       try {
         setLoading(true);
-        // Using direct fetch to bypass axios interceptors that might require auth
-        const res = await fetch(`/api/shared/${token}`);
+        const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+        const res = await fetch(`${baseUrl}/files/shared/${token}`);
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
           throw new Error(errData.message || 'Shared link is invalid or expired.');
@@ -35,7 +35,8 @@ const SharedView = () => {
   const handleDownload = async () => {
     try {
       setDownloading(true);
-      const res = await fetch(`/api/shared/${token}/download`);
+      const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+      const res = await fetch(`${baseUrl}/files/shared/${token}/download`);
       
       if (!res.ok) {
         const type = res.headers.get('content-type');

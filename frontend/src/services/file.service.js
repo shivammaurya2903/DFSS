@@ -29,12 +29,6 @@ export const downloadFile = async (fileId, filename) => {
     responseType: 'blob',
     timeout: 5 * 60 * 1000,
   });
-  
-  if (response.data.type === 'application/json' || (response.headers['content-type'] && response.headers['content-type'].includes('application/json'))) {
-    const text = await response.data.text();
-    const error = JSON.parse(text);
-    throw new Error(error.message || 'Error downloading file');
-  }
 
   // Trigger browser download
   const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -53,12 +47,6 @@ export const getFileBlob = async (fileId) => {
     responseType: 'blob',
     timeout: 5 * 60 * 1000,
   });
-  
-  if (response.data.type === 'application/json' || (response.headers['content-type'] && response.headers['content-type'].includes('application/json'))) {
-    const text = await response.data.text();
-    const error = JSON.parse(text);
-    throw new Error(error.message || 'Error viewing file');
-  }
   
   return response.data;
 };

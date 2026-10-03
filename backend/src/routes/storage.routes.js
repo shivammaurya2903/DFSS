@@ -9,6 +9,7 @@ const {
   heartbeat,
   registerNode,
   getSystemMetrics,
+  getPlacementDebug,
 } = require('../controllers/storageController');
 
 // ─────────────────────────────────────────
@@ -30,5 +31,6 @@ router.get('/nodes/:nodeId', authenticateToken, getNodeDetails);
 // Protected by JWT + admin role
 // ─────────────────────────────────────────
 router.get('/admin/metrics', authenticateToken, authorizeRoles('admin'), getSystemMetrics);
+router.get('/admin/placement/debug', authenticateToken, authorizeRoles('admin'), getPlacementDebug);
 
 module.exports = router;

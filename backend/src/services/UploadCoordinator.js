@@ -149,6 +149,7 @@ const UploadCoordinator = {
         const iv = crypto.randomBytes(16);
         const cipher = crypto.createCipheriv('aes-256-cbc', encryptionKey, iv);
         const encryptedChunk = Buffer.concat([iv, cipher.update(rawChunk), cipher.final()]);
+        const encryptedChecksum = crypto.createHash('sha256').update(encryptedChunk).digest('hex');
         encryptionTimes.push(Date.now() - encStart);
 
         const chunkId = `${fileDoc._id}_${i}`;
@@ -169,7 +170,7 @@ const UploadCoordinator = {
 
         const primaryUrl = primaryNode.url || await StorageService.getNodeUrlFromDB(primaryNode.nodeId) || StorageService.getNodeUrl(primaryNode.nodeId);
         const pWriteStart = Date.now();
-        await StorageService.writeChunk(primaryUrl, chunkId, encryptedChunk, chunkChecksum);
+        await StorageService.writeChunk(primaryUrl, chunkId, encryptedChunk, encryptedChecksum);
         physicalChunksWritten.push({ url: primaryUrl, chunkId });
         totalPrimaryWriteMs += Date.now() - pWriteStart;
 
@@ -177,7 +178,7 @@ const UploadCoordinator = {
         await File.findByIdAndUpdate(fileDoc._id, { status: 'REPLICATING' });
         for (const replicaNode of replicaNodes) {
           const replicaUrl = replicaNode.url || await StorageService.getNodeUrlFromDB(replicaNode.nodeId) || StorageService.getNodeUrl(replicaNode.nodeId);
-          await StorageService.writeChunk(replicaUrl, chunkId, encryptedChunk, chunkChecksum);
+          await StorageService.writeChunk(replicaUrl, chunkId, encryptedChunk, encryptedChecksum);
           physicalChunksWritten.push({ url: replicaUrl, chunkId });
         }
         totalReplicaWriteMs += Date.now() - rWriteStart;

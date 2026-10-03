@@ -348,6 +348,11 @@ const Dashboard = () => {
             </div>
 
             <div className="flex gap-2 mb-6 flex-wrap">
+              <Button variant="outline" className="flex-1 text-sm py-2 text-indigo-600 border-indigo-200 hover:bg-indigo-50" onClick={() => {
+                const token = localStorage.getItem('token');
+                const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+                window.open(`${baseUrl}/files/${selectedFile._id}/view?token=${token}`, '_blank');
+              }}>View</Button>
               <Button variant="primary" className="flex-1 text-sm py-2" onClick={async () => {
                 try {
                   await fileService.downloadFile(selectedFile._id, selectedFile.filename || selectedFile.originalName || selectedFile.name);
