@@ -214,10 +214,12 @@ class ProposedAdaptiveStrategy extends PlacementStrategy {
     const { eligible, filtered } = this._applyHardConstraints(nodes, file, chunkSize);
 
     if (eligible.length < replicationFactor) {
-      throw new Error(
-        `ProposedAdaptive: Hard constraints left only ${eligible.length} eligible node(s), ` +
-        `need ${replicationFactor}. Filtered: ${filtered.map(f => `${f.nodeId}(${f.reason})`).join(', ')}`
-      );
+      const err = new Error('Not enough eligible storage nodes for the configured replication factor.');
+      err.code = 'INSUFFICIENT_ELIGIBLE_NODES';
+      err.requiredNodes = replicationFactor;
+      err.eligibleNodes = eligible.length;
+      err.filteredNodes = filtered;
+      throw err;
     }
 
     // Step 2: Generate valid primary/replica pairs
@@ -250,11 +252,18 @@ class ProposedAdaptiveStrategy extends PlacementStrategy {
 
     const decisionTimeMs = Date.now() - start;
 
+    const allSameDomain = eligible.every(n => n.failureDomainId === eligible[0].failureDomainId);
+    let domainWarning = undefined;
+    if (allSameDomain && eligible.length >= replicationFactor) {
+      domainWarning = 'Failure-domain diversity unavailable in current prototype.';
+    }
+
     return {
       primary: best.primary,
       replicas: [best.replica],
       decisionTimeMs,
       metadata: {
+        domainWarning,
         candidateNodes: eligible.map(n => n.nodeId),
         filteredNodes: filtered,
         candidatePairs: scoredPairs.map(p => ({

@@ -7,6 +7,9 @@ import * as fileService from '../services/file.service';
 
 import { useAuth } from '../context/AuthContext';
 
+import ShareModal from '../components/common/ShareModal';
+import { Trash2 } from 'lucide-react';
+
 const Dashboard = () => {
   const { refreshUser } = useAuth();
   const [viewMode, setViewMode] = useState('list');
@@ -16,6 +19,25 @@ const Dashboard = () => {
   const [error, setError] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState('');
+  const [shareFile, setShareFile] = useState(null);
+  const [showConfirmDelete, setShowConfirmDelete] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+
+  const handleDelete = async (id) => {
+    try {
+      setShowConfirmDelete(null);
+      setDeletingId(id);
+      await fileService.deleteFile(id);
+      setFiles(files.filter(f => f._id !== id && f.id !== id));
+      if (selectedFile?._id === id || selectedFile?.id === id) {
+        setSelectedFile(null);
+      }
+    } catch (err) {
+      alert('Failed to delete file');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -91,10 +113,13 @@ const Dashboard = () => {
 
     } catch (err) {
       const msg = err.response?.data?.message || err.message;
-      if (err.response?.data?.code === 'STORED_FILE_LIMIT_EXCEEDED') {
+      const code = err.response?.data?.error || err.response?.data?.code;
+      if (code === 'STORED_FILE_LIMIT_EXCEEDED') {
         setError(`File exceeds the 10 MB stored-file limit. This file could not be reduced below the 10 MB storage limit.`);
-      } else if (err.response?.data?.code === 'USER_STORAGE_QUOTA_EXCEEDED') {
+      } else if (code === 'USER_STORAGE_QUOTA_EXCEEDED') {
         setError(`Not enough storage. Please delete some files.`);
+      } else if (code === 'INSUFFICIENT_ELIGIBLE_NODES') {
+        setError(`Upload temporarily unavailable. Not enough healthy storage nodes are currently available to safely store your file. (Eligible nodes: ${err.response.data.eligibleNodes || 0}, Required: ${err.response.data.requiredNodes || 2})`);
       } else {
         setError(`Upload failed: ${msg}`);
       }
@@ -250,11 +275,16 @@ const Dashboard = () => {
                   {files.map(file => (
                     <tr 
                       key={file._id || file.id} 
-                      className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer transition-colors"
+                      className={`border-b border-gray-50 hover:bg-gray-50 cursor-pointer transition-colors ${deletingId === (file._id || file.id) ? 'opacity-50 pointer-events-none' : ''}`}
                       onClick={() => setSelectedFile(file)}
                     >
                       <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 relative">
+                          {deletingId === (file._id || file.id) && (
+                            <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-20">
+                              <Loader2 className="w-4 h-4 animate-spin text-gray-600" />
+                            </div>
+                          )}
                           {getFileIcon(file.extension || file.type)}
                           <span className="font-medium text-gray-700">{file.originalName || file.name}</span>
                         </div>
@@ -275,9 +305,14 @@ const Dashboard = () => {
               {files.map(file => (
                 <div 
                   key={file._id || file.id} 
-                  className="bg-white p-4 rounded-xl border border-gray-100 hover:border-[#8178F2]/30 hover:shadow-sm cursor-pointer transition-all"
+                  className={`bg-white p-4 rounded-xl border border-gray-100 hover:border-[#8178F2]/30 hover:shadow-sm cursor-pointer transition-all relative ${deletingId === (file._id || file.id) ? 'opacity-50 pointer-events-none' : ''}`}
                   onClick={() => setSelectedFile(file)}
                 >
+                  {deletingId === (file._id || file.id) && (
+                    <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-20 rounded-xl">
+                      <Loader2 className="w-6 h-6 animate-spin text-gray-600" />
+                    </div>
+                  )}
                   <div className="h-32 bg-gray-50 rounded-lg mb-3 flex items-center justify-center">
                     {getFileIcon(file.extension || file.type)}
                   </div>
@@ -312,9 +347,16 @@ const Dashboard = () => {
               <p className="text-xs text-gray-500 mt-1">{(selectedFile.size / 1024).toFixed(2)} KB • {selectedFile.mimetype || selectedFile.type}</p>
             </div>
 
-            <div className="flex gap-2 mb-6">
-              <Button variant="primary" className="flex-1 text-sm py-2" onClick={() => window.open(selectedFile.url || '#', '_blank')}>Download</Button>
-              <Button variant="outline" className="flex-1 text-sm py-2 text-red-500 border-red-200 hover:bg-red-50 hover:text-red-600">Delete</Button>
+            <div className="flex gap-2 mb-6 flex-wrap">
+              <Button variant="primary" className="flex-1 text-sm py-2" onClick={async () => {
+                try {
+                  await fileService.downloadFile(selectedFile._id, selectedFile.filename || selectedFile.originalName || selectedFile.name);
+                } catch (e) {
+                  alert(e.message || 'Failed to download');
+                }
+              }}>Download</Button>
+              <Button variant="outline" className="flex-1 text-sm py-2 text-gray-700 border-gray-200 hover:bg-gray-50" onClick={() => setShareFile(selectedFile)}>Share</Button>
+              <Button variant="outline" className="flex-1 text-sm py-2 text-red-500 border-red-200 hover:bg-red-50 hover:text-red-600" onClick={() => setShowConfirmDelete(selectedFile._id)}>Delete</Button>
             </div>
 
             <div className="space-y-6">
@@ -353,6 +395,34 @@ const Dashboard = () => {
                   <div className="flex justify-between"><span className="text-gray-500 text-xs">Replication</span><span className="font-medium text-gray-800">{selectedFile.replicationFactor || 2} copies</span></div>
                 </div>
               </section>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {shareFile && (
+        <ShareModal file={shareFile} onClose={() => setShareFile(null)} />
+      )}
+
+      {showConfirmDelete && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">
+            <Trash2 className="w-12 h-12 text-red-500 mx-auto mb-4" />
+            <h2 className="text-lg font-bold text-gray-800 mb-2">Delete file permanently?</h2>
+            <p className="text-gray-600 text-sm mb-6">This action cannot be undone.</p>
+            <div className="flex gap-3 justify-center">
+              <button 
+                onClick={() => setShowConfirmDelete(null)}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => handleDelete(showConfirmDelete)}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors"
+              >
+                Delete
+              </button>
             </div>
           </div>
         </div>

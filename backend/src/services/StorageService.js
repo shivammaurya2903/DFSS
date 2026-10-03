@@ -156,6 +156,57 @@ const StorageService = {
     const node = await StorageNode.findOne({ nodeId });
     return node ? node.url : null;
   },
+
+  /**
+   * Discover and initialize all storage nodes on backend startup.
+   * Proactively checks their health and metrics to avoid UNKNOWN states.
+   */
+  async discoverNodes() {
+    const StorageNode = require('../models/StorageNode');
+    console.log(`[StorageService] Discovering storage nodes from config...`);
+    
+    for (const nodeUrl of config.storageNodes) {
+      try {
+        const metrics = await this.getNodeMetrics(nodeUrl);
+        const health = await this.getNodeHealth(nodeUrl);
+        
+        if (!metrics || !health || !health.nodeId) continue;
+        
+        const nodeId = health.nodeId;
+        const { totalSpace, availableSpace, usedSpace, currentLoad, activeRequests, chunkCount } = metrics;
+        
+        let node = await StorageNode.findOne({ nodeId });
+        
+        if (node) {
+          node.url = nodeUrl;
+          if (totalSpace !== undefined) node.capacity = totalSpace;
+          if (availableSpace !== undefined) node.freeSpace = availableSpace;
+          if (usedSpace !== undefined) node.usedSpace = usedSpace;
+          if (currentLoad !== undefined) node.currentLoad = currentLoad;
+          
+          node.status = 'HEALTHY';
+          node.lastHeartbeat = new Date();
+          await node.save();
+        } else {
+          node = await StorageNode.create({
+            nodeId,
+            url: nodeUrl,
+            capacity: totalSpace || 0,
+            freeSpace: availableSpace || 0,
+            usedSpace: usedSpace || 0,
+            currentLoad: currentLoad || 0,
+            status: 'HEALTHY',
+            lastHeartbeat: new Date(),
+            failureDomainId: 'LOCAL-HDD', // Default for prototype
+            securityCapabilities: ['PUBLIC', 'PRIVATE', 'SENSITIVE'],
+          });
+        }
+        console.log(`[StorageService] Discovered & initialized ${nodeId} at ${nodeUrl} as HEALTHY`);
+      } catch (err) {
+        console.warn(`[StorageService] Failed to discover node at ${nodeUrl}: ${err.message}`);
+      }
+    }
+  },
 };
 
 module.exports = StorageService;

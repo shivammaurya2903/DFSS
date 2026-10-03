@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Grid, List as ListIcon, Filter, FileText, Image, Video, Music, Archive, MoreVertical, Eye, Download, Trash2, File as FileIcon, Clock, HardDrive, AlertCircle } from 'lucide-react';
+import { Search, Grid, List as ListIcon, Filter, FileText, Image, Video, Music, Archive, MoreVertical, Eye, Download, Trash2, File as FileIcon, Clock, HardDrive, AlertCircle, Share2, Loader } from 'lucide-react';
 import { getFiles, deleteFile, downloadFile } from '../services/file.service';
+import ShareModal from '../components/common/ShareModal';
 
 const formatSize = (bytes) => {
   if (!bytes) return '0 B';
@@ -38,6 +39,9 @@ const Files = () => {
   const [sortBy, setSortBy] = useState('name');
   const [filterType, setFilterType] = useState('all');
   const [actionMenuOpen, setActionMenuOpen] = useState(null);
+  const [shareFile, setShareFile] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+  const [showConfirmDelete, setShowConfirmDelete] = useState(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -58,16 +62,22 @@ const Files = () => {
     }
   };
 
-  const handleDelete = async (e, id) => {
+  const confirmDelete = (e, id) => {
     e.stopPropagation();
-    if (window.confirm('Are you sure you want to delete this file?')) {
-      try {
-        await deleteFile(id);
-        setFiles(files.filter(f => f._id !== id));
-        setActionMenuOpen(null);
-      } catch (err) {
-        alert('Failed to delete file');
-      }
+    setShowConfirmDelete(id);
+    setActionMenuOpen(null);
+  };
+
+  const handleDelete = async (id) => {
+    try {
+      setShowConfirmDelete(null);
+      setDeletingId(id);
+      await deleteFile(id);
+      setFiles(files.filter(f => f._id !== id));
+    } catch (err) {
+      alert('Failed to delete file');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -77,8 +87,14 @@ const Files = () => {
       await downloadFile(file._id, file.filename);
       setActionMenuOpen(null);
     } catch (err) {
-      alert('Failed to download file');
+      alert(err.message || 'Failed to download file');
     }
+  };
+
+  const handleShare = (e, file) => {
+    e.stopPropagation();
+    setShareFile(file);
+    setActionMenuOpen(null);
   };
 
   const handleViewDetails = (id) => {
@@ -113,7 +129,7 @@ const Files = () => {
   if (error) return <div className="p-8 text-center text-red-500 flex flex-col items-center gap-2"><AlertCircle /> {error}</div>;
 
   return (
-    <div className="p-6 h-full flex flex-col bg-gray-50">
+    <div className="p-6 h-full flex flex-col bg-gray-50 relative">
       <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
         <h1 className="text-2xl font-bold text-gray-800">My Files</h1>
         
@@ -185,10 +201,16 @@ const Files = () => {
             {filteredFiles.map(file => (
               <div 
                 key={file._id} 
-                className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md transition-shadow cursor-pointer relative group"
+                className={`bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md transition-shadow cursor-pointer relative group ${deletingId === file._id ? 'opacity-50 pointer-events-none' : ''}`}
                 onClick={() => handleViewDetails(file._id)}
               >
-                <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                {deletingId === file._id && (
+                  <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-20 rounded-xl">
+                    <Loader className="w-6 h-6 animate-spin text-gray-600" />
+                  </div>
+                )}
+                
+                <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                   <button 
                     onClick={(e) => toggleActionMenu(e, file._id)}
                     className="p-1.5 bg-white rounded-md shadow-sm border border-gray-100 hover:bg-gray-50"
@@ -200,7 +222,8 @@ const Files = () => {
                     <div className="absolute right-0 mt-1 w-36 bg-white rounded-lg shadow-lg border border-gray-100 z-10 py-1">
                       <button onClick={(e) => { e.stopPropagation(); navigate(`/files/${file._id}/view`); }} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"><Eye className="w-4 h-4" /> View</button>
                       <button onClick={(e) => handleDownload(e, file)} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"><Download className="w-4 h-4" /> Download</button>
-                      <button onClick={(e) => handleDelete(e, file._id)} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"><Trash2 className="w-4 h-4" /> Delete</button>
+                      <button onClick={(e) => handleShare(e, file)} className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"><Share2 className="w-4 h-4" /> Share</button>
+                      <button onClick={(e) => confirmDelete(e, file._id)} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"><Trash2 className="w-4 h-4" /> Delete</button>
                     </div>
                   )}
                 </div>
@@ -231,8 +254,13 @@ const Files = () => {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filteredFiles.map(file => (
-                  <tr key={file._id} className="hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => handleViewDetails(file._id)}>
-                    <td className="px-6 py-4 flex items-center gap-3">
+                  <tr key={file._id} className={`hover:bg-gray-50 cursor-pointer transition-colors ${deletingId === file._id ? 'opacity-50 pointer-events-none' : ''}`} onClick={() => handleViewDetails(file._id)}>
+                    <td className="px-6 py-4 flex items-center gap-3 relative">
+                      {deletingId === file._id && (
+                         <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-20">
+                           <Loader className="w-4 h-4 animate-spin text-gray-600" />
+                         </div>
+                      )}
                       {getFileIcon(file.mimeType)}
                       <span className="font-medium text-gray-800 truncate max-w-xs" title={file.filename}>{file.filename}</span>
                     </td>
@@ -246,7 +274,8 @@ const Files = () => {
                       <div className="flex items-center justify-end gap-2">
                         <button onClick={(e) => { e.stopPropagation(); navigate(`/files/${file._id}/view`); }} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="View"><Eye className="w-4 h-4" /></button>
                         <button onClick={(e) => handleDownload(e, file)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Download"><Download className="w-4 h-4" /></button>
-                        <button onClick={(e) => handleDelete(e, file._id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete"><Trash2 className="w-4 h-4" /></button>
+                        <button onClick={(e) => handleShare(e, file)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Share"><Share2 className="w-4 h-4" /></button>
+                        <button onClick={(e) => confirmDelete(e, file._id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Delete"><Trash2 className="w-4 h-4" /></button>
                       </div>
                     </td>
                   </tr>
@@ -256,6 +285,34 @@ const Files = () => {
           </div>
         )}
       </div>
+
+      {shareFile && (
+        <ShareModal file={shareFile} onClose={() => setShareFile(null)} />
+      )}
+
+      {showConfirmDelete && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">
+            <Trash2 className="w-12 h-12 text-red-500 mx-auto mb-4" />
+            <h2 className="text-lg font-bold text-gray-800 mb-2">Delete file permanently?</h2>
+            <p className="text-gray-600 text-sm mb-6">This action cannot be undone.</p>
+            <div className="flex gap-3 justify-center">
+              <button 
+                onClick={() => setShowConfirmDelete(null)}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => handleDelete(showConfirmDelete)}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

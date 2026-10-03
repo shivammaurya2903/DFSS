@@ -54,14 +54,17 @@ const PlacementPolicyManager = {
     const strategy = strategyMap[strategyKey] || proposedAdaptive;
 
     // Load all current node states from DB
-    const nodes = await StorageNode.find({});
+    const allNodes = await StorageNode.find({});
+    
+    // Only HEALTHY nodes are eligible for new placement (Phase 30)
+    const eligibleNodes = allNodes.filter(n => n.status === 'HEALTHY');
 
     const context = {
       file,
       chunkId,
       chunkSize,
       replicationFactor,
-      nodes,
+      nodes: eligibleNodes,
       runId,
       scenarioId,
       existingPlacements,
@@ -84,8 +87,11 @@ const PlacementPolicyManager = {
       candidatePairs: (result.metadata.candidatePairs || []),
       selectedPrimary: result.primary.nodeId,
       selectedReplica: result.replicas[0]?.nodeId || null,
-      failureDomainInfo: result.metadata.failureDomainInfo || {},
-      nodeMetricsSnapshot: nodes.reduce((acc, n) => {
+      failureDomainInfo: {
+        ...(result.metadata.failureDomainInfo || {}),
+        warning: result.metadata.domainWarning
+      },
+      nodeMetricsSnapshot: allNodes.reduce((acc, n) => {
         acc[n.nodeId] = {
           status: n.status,
           freeSpace: n.freeSpace,

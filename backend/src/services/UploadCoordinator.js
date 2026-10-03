@@ -70,9 +70,12 @@ const UploadCoordinator = {
 
     // ─────────────────────────────────────────
     // POST-COMPRESSION VALIDATION
-    // The user's storage quota (default 100 MB) is the actual size constraint.
-    // No per-file size limit — files are chunked into CHUNK_SIZE_MB pieces.
     // ─────────────────────────────────────────
+    if (storedSize > 10 * 1024 * 1024) {
+      if (tempCompressedPath) try { fs.unlinkSync(tempCompressedPath); } catch (_) {}
+      try { fs.unlinkSync(fileData.path); } catch (_) {}
+      throw Object.assign(new Error('This file could not be reduced below the 10 MB storage limit.'), { code: 'STORED_FILE_LIMIT_EXCEEDED' });
+    }
 
     // ─────────────────────────────────────────
     // QUOTA RESERVATION
@@ -134,6 +137,7 @@ const UploadCoordinator = {
       let totalPlacementTimeMs = 0;
       let totalPrimaryWriteMs = 0;
       let totalReplicaWriteMs = 0;
+      const physicalChunksWritten = [];
       const encryptionTimes = [];
 
       for (let i = 0; i < totalChunks; i++) {
@@ -166,6 +170,7 @@ const UploadCoordinator = {
         const primaryUrl = primaryNode.url || await StorageService.getNodeUrlFromDB(primaryNode.nodeId) || StorageService.getNodeUrl(primaryNode.nodeId);
         const pWriteStart = Date.now();
         await StorageService.writeChunk(primaryUrl, chunkId, encryptedChunk, chunkChecksum);
+        physicalChunksWritten.push({ url: primaryUrl, chunkId });
         totalPrimaryWriteMs += Date.now() - pWriteStart;
 
         const rWriteStart = Date.now();
@@ -173,6 +178,7 @@ const UploadCoordinator = {
         for (const replicaNode of replicaNodes) {
           const replicaUrl = replicaNode.url || await StorageService.getNodeUrlFromDB(replicaNode.nodeId) || StorageService.getNodeUrl(replicaNode.nodeId);
           await StorageService.writeChunk(replicaUrl, chunkId, encryptedChunk, chunkChecksum);
+          physicalChunksWritten.push({ url: replicaUrl, chunkId });
         }
         totalReplicaWriteMs += Date.now() - rWriteStart;
 
@@ -244,6 +250,17 @@ const UploadCoordinator = {
 
       // Release Quota
       await User.findByIdAndUpdate(userId, { $inc: { reservedStorage: -storedSize } });
+
+      // Clean up orphaned physical chunks
+      if (typeof physicalChunksWritten !== 'undefined' && physicalChunksWritten.length > 0) {
+        for (const { url, chunkId } of physicalChunksWritten) {
+          try {
+            await StorageService.deleteChunk(url, chunkId);
+          } catch (cleanupErr) {
+            console.error(`Failed to cleanup chunk ${chunkId} from ${url}:`, cleanupErr.message);
+          }
+        }
+      }
 
       try { if (fileData.path) fs.unlinkSync(fileData.path); } catch (_) {}
       if (tempCompressedPath) try { fs.unlinkSync(tempCompressedPath); } catch (_) {}

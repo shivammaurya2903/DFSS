@@ -12,8 +12,15 @@ const {
   getExpired,
   uploadFile,
   getFileDetails,
+  viewFile,
   downloadFile,
   deleteFile,
+  createShare,
+  getFileShares,
+  revokeShare,
+  getSharedFile,
+  viewSharedFile,
+  downloadSharedFile,
 } = require('../controllers/filesController');
 
 // Use disk storage so large files don't exhaust memory
@@ -27,6 +34,11 @@ const upload = multer({
   },
 });
 
+// Public Shared Routes
+router.get('/shared/link/:token', getSharedFile);
+router.get('/shared/link/:token/view', viewSharedFile);
+router.get('/shared/link/:token/download', downloadSharedFile);
+
 router.use(authenticateToken);
 
 // File CRUD
@@ -37,7 +49,13 @@ router.get('/favorites', getFavorites);
 router.get('/recent', getRecent);
 router.get('/expired', getExpired);
 router.get('/:fileId', getFileDetails);
+router.get('/:fileId/view', viewFile);
 router.get('/:fileId/download', downloadFile);
 router.delete('/:fileId', deleteFile);
+
+// Sharing management
+router.post('/:fileId/share', createShare);
+router.get('/:fileId/shares', getFileShares);
+router.delete('/:fileId/share/:shareId', revokeShare);
 
 module.exports = router;

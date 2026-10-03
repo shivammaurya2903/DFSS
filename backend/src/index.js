@@ -11,6 +11,10 @@ const startServer = async () => {
 
   try {
     await connectDB();
+    
+    // Discover nodes BEFORE accepting placement
+    const StorageService = require('./services/StorageService');
+    await StorageService.discoverNodes();
 
     const server = app.listen(config.port, config.host, () => {
       console.log(`[Server] Backend running on http://${config.host}:${config.port}`);

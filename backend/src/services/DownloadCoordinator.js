@@ -136,15 +136,9 @@ const DownloadCoordinator = {
     }
     timings.reconstructionTime = Date.now() - reconstructStart;
 
-    const streamStart = Date.now();
-    const finalName = file.originalFileName || file.originalName || file.filename;
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(finalName)}"`);
-    res.setHeader('Content-Type', file.originalMimeType || file.mimeType || 'application/octet-stream');
-    res.setHeader('Content-Length', fullBuffer.length);
-    res.send(fullBuffer);
-    timings.streamTime = Date.now() - streamStart;
-
     timings.totalDownloadTime = Date.now() - globalStart;
+    
+    const finalName = file.originalFileName || file.originalName || file.filename;
 
     await AuditLog.create({
       requestId,
@@ -161,7 +155,7 @@ const DownloadCoordinator = {
       },
     });
 
-    return { timings };
+    return { fullBuffer, file, timings };
   },
 };
 

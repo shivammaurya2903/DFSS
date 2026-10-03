@@ -20,6 +20,8 @@ import Profile from './pages/Profile';
 import AuthPage from './pages/AuthPage';
 import ErrorBoundary from './components/common/ErrorBoundary';
 
+import SharedView from './pages/SharedView';
+
 function App() {
   return (
     <BrowserRouter>
@@ -27,6 +29,7 @@ function App() {
         <Routes>
         <Route path="/login" element={<AuthPage />} />
         <Route path="/register" element={<AuthPage />} />
+        <Route path="/shared/:token" element={<SharedView />} />
         
         <Route element={<ProtectedRoute />}>
           <Route path="/" element={<MainLayout />}>

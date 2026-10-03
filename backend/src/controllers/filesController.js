@@ -86,13 +86,45 @@ const getFileDetails = async (req, res, next) => {
 // ─────────────────────────────────────────
 const downloadFile = async (req, res, next) => {
   try {
-    await DownloadCoordinator.download({
+    const { fullBuffer, file } = await DownloadCoordinator.download({
       fileId: req.params.fileId,
       userId: req.user.id,
       requestId: req.requestId,
       res,
     });
-    // Response already sent by DownloadCoordinator
+    const finalName = file.originalFileName || file.originalName || file.filename;
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(finalName)}"`);
+    res.setHeader('Content-Type', file.originalMimeType || file.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Length', fullBuffer.length);
+    res.send(fullBuffer);
+  } catch (err) {
+    if (!res.headersSent) {
+      next(err);
+    }
+  }
+};
+
+// ─────────────────────────────────────────
+// VIEW FILE
+// ─────────────────────────────────────────
+const viewFile = async (req, res, next) => {
+  try {
+    const { fullBuffer, file } = await DownloadCoordinator.download({
+      fileId: req.params.fileId,
+      userId: req.user.id,
+      requestId: req.requestId,
+      res,
+    });
+    const finalName = file.originalFileName || file.originalName || file.filename;
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(finalName)}"`);
+    let mime = file.originalMimeType || file.mimeType;
+    if (!mime || mime === 'application/octet-stream') {
+      // Fallback if genuinely unknown, though instructions say "Never return application/octet-stream for view unless it's genuinely unknown."
+      mime = 'application/octet-stream';
+    }
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Content-Length', fullBuffer.length);
+    res.send(fullBuffer);
   } catch (err) {
     if (!res.headersSent) {
       next(err);
@@ -126,7 +158,10 @@ const deleteFile = async (req, res, next) => {
             await StorageService.deleteChunk(url, chunk.chunkId);
           }
         } catch (err) {
-          errors.push(`Node ${nodeId} chunk ${chunk.chunkId}: ${err.message}`);
+          const is404 = err.response && err.response.status === 404;
+          if (!is404) {
+            errors.push(`Node ${nodeId} chunk ${chunk.chunkId}: ${err.message}`);
+          }
         }
       }
       await Chunk.findByIdAndDelete(chunk._id);
@@ -146,7 +181,7 @@ const deleteFile = async (req, res, next) => {
     await AuditLog.create({
       requestId: req.requestId,
       userId: req.user.id,
-      action: 'DELETE',
+      action: 'FILE_DELETED',
       status: errors.length === 0 ? 'SUCCESS' : 'FAILURE',
       fileId: file._id,
       reason: errors.length > 0 ? errors.join('; ') : undefined,
@@ -159,6 +194,161 @@ const deleteFile = async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+};
+
+// ─────────────────────────────────────────
+// SHARING
+// ─────────────────────────────────────────
+const createShare = async (req, res, next) => {
+  try {
+    const file = await File.findOne({ _id: req.params.fileId, owner: req.user.id });
+    if (!file) {
+      return res.status(404).json({ success: false, code: 'FILE_NOT_FOUND', message: 'File not found' });
+    }
+
+    const { token, tokenHash } = ShareToken.generateToken();
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + (req.body.expiresInDays || 7));
+
+    const share = await ShareToken.create({
+      fileId: file._id,
+      ownerId: req.user.id,
+      tokenHash,
+      expiresAt,
+      permission: req.body.permission || 'viewer',
+      sharedWithEmail: req.body.email || null,
+    });
+
+    const host = req.headers.host || 'localhost';
+    const protocol = req.secure ? 'https' : 'http';
+    const shareUrl = `${protocol}://${host}/shared/link/${token}`;
+
+    res.status(201).json({
+      success: true,
+      data: {
+        shareId: share._id,
+        token,
+        shareUrl,
+        expiresAt,
+        fileName: file.originalFileName || file.originalName || file.filename,
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const getFileShares = async (req, res, next) => {
+  try {
+    const shares = await ShareToken.find({ fileId: req.params.fileId, ownerId: req.user.id });
+    res.json({ success: true, data: shares });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const revokeShare = async (req, res, next) => {
+  try {
+    const share = await ShareToken.findOne({ _id: req.params.shareId, fileId: req.params.fileId, ownerId: req.user.id });
+    if (!share) {
+      return res.status(404).json({ success: false, code: 'SHARE_NOT_FOUND', message: 'Share token not found' });
+    }
+    share.revokedAt = new Date();
+    await share.save();
+    res.json({ success: true, message: 'Share revoked successfully' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const getSharedFile = async (req, res, next) => {
+  try {
+    const token = req.params.token;
+    const tokenHash = ShareToken.hashToken(token);
+    const share = await ShareToken.findOne({ tokenHash });
+    if (!share || !share.isValid()) {
+      return res.status(403).json({ success: false, code: 'INVALID_SHARE', message: 'Invalid or expired share link' });
+    }
+
+    const file = await File.findById(share.fileId).select('-chunks');
+    if (!file) {
+      return res.status(404).json({ success: false, code: 'FILE_NOT_FOUND', message: 'File not found' });
+    }
+
+    res.json({ success: true, data: file });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const viewSharedFile = async (req, res, next) => {
+  try {
+    const token = req.params.token;
+    const tokenHash = ShareToken.hashToken(token);
+    const share = await ShareToken.findOne({ tokenHash });
+    if (!share || !share.isValid()) {
+      return res.status(403).json({ success: false, code: 'INVALID_SHARE', message: 'Invalid or expired share link' });
+    }
+
+    const fileMeta = await File.findById(share.fileId);
+    if (!fileMeta) {
+      return res.status(404).json({ success: false, code: 'FILE_NOT_FOUND', message: 'File not found' });
+    }
+
+    const { fullBuffer, file } = await DownloadCoordinator.download({
+      fileId: share.fileId,
+      userId: fileMeta.owner,
+      requestId: req.requestId,
+      res,
+    });
+    
+    const finalName = file.originalFileName || file.originalName || file.filename;
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(finalName)}"`);
+    let mime = file.originalMimeType || file.mimeType;
+    if (!mime || mime === 'application/octet-stream') {
+      mime = 'application/octet-stream';
+    }
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Content-Length', fullBuffer.length);
+    res.send(fullBuffer);
+  } catch (err) {
+    if (!res.headersSent) {
+      next(err);
+    }
+  }
+};
+
+const downloadSharedFile = async (req, res, next) => {
+  try {
+    const token = req.params.token;
+    const tokenHash = ShareToken.hashToken(token);
+    const share = await ShareToken.findOne({ tokenHash });
+    if (!share || !share.isValid()) {
+      return res.status(403).json({ success: false, code: 'INVALID_SHARE', message: 'Invalid or expired share link' });
+    }
+
+    const fileMeta = await File.findById(share.fileId);
+    if (!fileMeta) {
+      return res.status(404).json({ success: false, code: 'FILE_NOT_FOUND', message: 'File not found' });
+    }
+
+    const { fullBuffer, file } = await DownloadCoordinator.download({
+      fileId: share.fileId,
+      userId: fileMeta.owner,
+      requestId: req.requestId,
+      res,
+    });
+
+    const finalName = file.originalFileName || file.originalName || file.filename;
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(finalName)}"`);
+    res.setHeader('Content-Type', file.originalMimeType || file.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Length', fullBuffer.length);
+    res.send(fullBuffer);
+  } catch (err) {
+    if (!res.headersSent) {
+      next(err);
+    }
   }
 };
 
@@ -194,7 +384,14 @@ module.exports = {
   getExpired,
   uploadFile,
   getFileDetails,
+  viewFile,
   downloadFile,
   deleteFile,
+  createShare,
+  getFileShares,
+  revokeShare,
+  getSharedFile,
+  viewSharedFile,
+  downloadSharedFile,
 };
 

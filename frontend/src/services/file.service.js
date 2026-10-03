@@ -29,6 +29,13 @@ export const downloadFile = async (fileId, filename) => {
     responseType: 'blob',
     timeout: 5 * 60 * 1000,
   });
+  
+  if (response.data.type === 'application/json' || (response.headers['content-type'] && response.headers['content-type'].includes('application/json'))) {
+    const text = await response.data.text();
+    const error = JSON.parse(text);
+    throw new Error(error.message || 'Error downloading file');
+  }
+
   // Trigger browser download
   const url = window.URL.createObjectURL(new Blob([response.data]));
   const link = document.createElement('a');
@@ -42,10 +49,17 @@ export const downloadFile = async (fileId, filename) => {
 };
 
 export const getFileBlob = async (fileId) => {
-  const response = await api.get(`/files/${fileId}/download`, {
+  const response = await api.get(`/files/${fileId}/view`, {
     responseType: 'blob',
     timeout: 5 * 60 * 1000,
   });
+  
+  if (response.data.type === 'application/json' || (response.headers['content-type'] && response.headers['content-type'].includes('application/json'))) {
+    const text = await response.data.text();
+    const error = JSON.parse(text);
+    throw new Error(error.message || 'Error viewing file');
+  }
+  
   return response.data;
 };
 
@@ -62,4 +76,19 @@ export const getRecentFiles = async () => {
 export const getSharedFiles = async () => {
   const response = await api.get('/files/shared');
   return response.data?.data || [];
+};
+
+export const shareFile = async (fileId, expiresIn) => {
+  const response = await api.post(`/files/${fileId}/share`, { expiresIn });
+  return response.data;
+};
+
+export const getFileShares = async (fileId) => {
+  const response = await api.get(`/files/${fileId}/shares`);
+  return response.data?.data || [];
+};
+
+export const revokeShare = async (fileId, token) => {
+  const response = await api.delete(`/files/${fileId}/share/${token}`);
+  return response.data;
 };
