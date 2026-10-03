@@ -131,12 +131,12 @@ const AdminDashboard = () => {
                   <div className="flex items-center gap-3">
                     <div className={`w-2.5 h-2.5 rounded-full ${node.status === 'HEALTHY' ? 'bg-emerald-500' : (node.status === 'DEGRADED' ? 'bg-orange-500' : 'bg-red-500')}`}></div>
                     <div>
-                      <div className="text-sm font-medium text-gray-800">{node.name || node.id}</div>
-                      <div className="text-xs text-gray-500">{formatBytes(node.usedSpace)} / {formatBytes(node.totalSpace)}</div>
+                      <div className="text-sm font-medium text-gray-800">{node.name || node.nodeId || node.id}</div>
+                      <div className="text-xs text-gray-500">{formatBytes(node.usedSpace || 0)} / {formatBytes(node.capacity || node.totalSpace || 0)}</div>
                     </div>
                   </div>
                   <div className="text-xs font-medium text-gray-500">
-                    {Math.round((node.usedSpace / node.totalSpace) * 100 || 0)}% Load
+                    {Math.round(((node.usedSpace || 0) / (node.capacity || node.totalSpace || 1)) * 100)}% Load
                   </div>
                 </div>
               ))
@@ -159,7 +159,7 @@ const AdminDashboard = () => {
                   <div className="text-[#8178F2] font-medium min-w-[80px]">{act.action}</div>
                   <div className="text-gray-600 truncate flex-1">{act.details?.filename || act.fileId || "System Event"}</div>
                   <div className="text-gray-400 text-xs whitespace-nowrap">
-                    {new Date(act.createdAt).toLocaleDateString()}
+                    {new Date(act.timestamp || act.createdAt || act.date || Date.now()).toLocaleDateString()}
                   </div>
                 </div>
               ))

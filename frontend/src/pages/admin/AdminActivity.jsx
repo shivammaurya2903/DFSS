@@ -83,12 +83,14 @@ const AdminActivity = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-800">
-                      {act.userId || 'System'}
+                      {act.userId && typeof act.userId === 'object' 
+                        ? (act.userId.name || act.userId.email) 
+                        : (act.userId || 'System')}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
                       {act.fileId ? (
-                        <div className="truncate max-w-[200px]" title={act.details?.filename || act.fileId}>
-                          {act.details?.filename || act.fileId}
+                        <div className="truncate max-w-[200px]" title={act.details?.filename || (typeof act.fileId === 'object' ? act.fileId.originalName : act.fileId)}>
+                          {act.details?.filename || (typeof act.fileId === 'object' ? act.fileId.originalName || act.fileId._id : act.fileId)}
                         </div>
                       ) : '-'}
                     </td>

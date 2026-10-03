@@ -127,7 +127,9 @@ const Activity = () => {
                 {acts.map((act) => (
                   <div key={act._id || act.id} className="relative flex items-start gap-4 md:gap-6 pl-10 md:pl-0 md:justify-center">
                     <div className="hidden md:block w-[45%] text-right pt-2">
-                      <span className="text-sm font-medium text-[#17181C]">{act.user}</span>
+                      <span className="text-sm font-medium text-[#17181C]">
+                        {act.user && typeof act.user === 'object' ? (act.user.name || act.user.email) : (act.user || 'System')}
+                      </span>
                       <p className="text-xs text-[#6F737D] mt-0.5">{formatRelativeTime(act.createdAt || act.date)}</p>
                     </div>
                     
@@ -138,7 +140,9 @@ const Activity = () => {
                     <div className="w-full md:w-[45%] bg-white p-4 rounded-xl border border-[#E7E9EF] shadow-sm">
                       <p className="text-sm text-[#17181C]">{act.action}</p>
                       <div className="md:hidden mt-2 pt-2 border-t border-[#F5F7FB]">
-                        <span className="text-xs font-medium text-[#17181C] mr-2">{act.user}</span>
+                        <span className="text-xs font-medium text-[#17181C] mr-2">
+                          {act.user && typeof act.user === 'object' ? (act.user.name || act.user.email) : (act.user || 'System')}
+                        </span>
                         <span className="text-xs text-[#6F737D]">{formatRelativeTime(act.createdAt || act.date)}</span>
                       </div>
                     </div>

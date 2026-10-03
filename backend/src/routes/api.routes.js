@@ -4,6 +4,7 @@ const authRoutes = require('./auth.routes');
 const filesRoutes = require('./files.routes');
 const storageRoutes = require('./storage.routes');
 const activityRoutes = require('./activity.routes');
+const usersRoutes = require('./users.routes');
 const { getHealth } = require('../controllers/health.controller');
 
 // ─────────────────────────────────────────
@@ -30,5 +31,7 @@ router.use('/storage', storageRoutes);
 // Activity / Audit log
 // ─────────────────────────────────────────
 router.use('/activity', activityRoutes);
+
+router.use('/users', usersRoutes);
 
 module.exports = router;

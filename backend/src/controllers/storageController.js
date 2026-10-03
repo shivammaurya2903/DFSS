@@ -1,5 +1,7 @@
 const StorageNode = require('../models/StorageNode');
 const AuditLog = require('../models/AuditLog');
+const User = require('../models/User');
+const File = require('../models/File');
 const config = require('../config');
 
 // ─────────────────────────────────────────
@@ -126,7 +128,12 @@ const heartbeat = async (req, res, next) => {
 // ─────────────────────────────────────────
 const getSystemMetrics = async (req, res, next) => {
   try {
-    const nodes = await StorageNode.find();
+    const [nodes, totalUsers, totalFiles] = await Promise.all([
+      StorageNode.find(),
+      User.countDocuments(),
+      File.countDocuments()
+    ]);
+
     const totalCapacity = nodes.reduce((s, n) => s + (n.capacity || 0), 0);
     const totalUsed = nodes.reduce((s, n) => s + (n.usedSpace || 0), 0);
     const totalChunks = nodes.reduce((s, n) => s + (n.chunkCount || 0), 0);
@@ -139,6 +146,9 @@ const getSystemMetrics = async (req, res, next) => {
     res.json({
       success: true,
       data: {
+        totalUsers,
+        totalFiles,
+        totalStorage: totalUsed,
         totalNodes: nodes.length,
         healthyNodes: healthyCnt,
         offlineNodes: offlineCnt,

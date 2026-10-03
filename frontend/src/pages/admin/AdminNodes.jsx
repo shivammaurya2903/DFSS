@@ -110,7 +110,7 @@ const AdminNodes = () => {
                 <tr><td colSpan="6" className="px-6 py-8 text-center text-gray-500">No nodes found.</td></tr>
               ) : (
                 filteredNodes.map(node => {
-                  const loadPercent = Math.round((node.usedSpace / node.totalSpace) * 100) || 0;
+                  const loadPercent = Math.round((node.usedSpace / node.capacity) * 100) || 0;
                   return (
                     <tr 
                       key={node.id} 
@@ -125,7 +125,7 @@ const AdminNodes = () => {
                         {getStatusBadge(node.status)}
                       </td>
                       <td className="px-6 py-4">
-                        <div className="text-sm text-gray-800">{formatBytes(node.totalSpace)}</div>
+                        <div className="text-sm text-gray-800">{formatBytes(node.capacity)}</div>
                         <div className="text-xs text-gray-500">{formatBytes(node.usedSpace)} used</div>
                       </td>
                       <td className="px-6 py-4 w-48">
