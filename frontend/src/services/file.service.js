@@ -56,6 +56,16 @@ export const deleteFile = async (fileId) => {
   return response.data;
 };
 
+export const getFavorites = async (options = {}) => {
+  const response = await api.get('/files/favorites', options);
+  return response.data?.data || [];
+};
+
+export const toggleFavorite = async (fileId) => {
+  const response = await api.post(`/files/${fileId}/favorite`);
+  return response.data?.data;
+};
+
 export const getRecentFiles = async () => {
   const response = await api.get('/files/recent');
   return response.data?.data || [];

@@ -50,6 +50,10 @@ const fileSchema = new mongoose.Schema({
   originalFileName: {
     type: String,
   },
+  isFavorite: {
+    type: Boolean,
+    default: false,
+  },
   checksum: {
     // SHA-256 of the stored file content
     type: String,

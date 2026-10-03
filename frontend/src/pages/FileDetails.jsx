@@ -5,6 +5,7 @@ import {
   HardDrive, Shield, CheckCircle, Activity, Server, Clock, Trash2, Edit
 } from 'lucide-react';
 import { getFileDetails, downloadFile, deleteFile } from '../services/file.service';
+import { useToast } from '../context/ToastContext';
 
 const formatSize = (bytes) => {
   if (!bytes) return '0 B';
@@ -34,6 +35,7 @@ const getFileIcon = (mimeType) => {
 const FileDetails = () => {
   const { fileId } = useParams();
   const navigate = useNavigate();
+  const { addToast } = useToast();
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -59,7 +61,7 @@ const FileDetails = () => {
     try {
       await downloadFile(file._id, file.filename);
     } catch (err) {
-      alert('Failed to download file');
+      addToast('Failed to download file', 'error');
     }
   };
 
@@ -68,8 +70,9 @@ const FileDetails = () => {
       try {
         await deleteFile(file._id);
         navigate('/files');
+        addToast('File deleted', 'success');
       } catch (err) {
-        alert('Failed to delete file');
+        addToast('Failed to delete file', 'error');
       }
     }
   };

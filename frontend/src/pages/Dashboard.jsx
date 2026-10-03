@@ -1,441 +1,361 @@
-import React, { useState, useEffect } from 'react';
-import { Folder, MoreHorizontal, LayoutGrid, List, File, FileText, Image as ImageIcon, CheckSquare, Settings, Share2, Info, X, Cloud, Loader2, AlertCircle, UploadCloud, HardDrive } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import PageContainer from '../components/layout/PageContainer';
-import Badge from '../components/common/Badge';
-import Button from '../components/common/Button';
 import * as fileService from '../services/file.service';
-
+import * as activityService from '../services/activity.service';
 import { useAuth } from '../context/AuthContext';
-
+import { useToast } from '../context/ToastContext';
+import { formatBytes, formatDate, formatRelativeTime, getFileDisplayName } from '../utils/formatters';
+import { getFileIconComponent } from '../utils/fileIcons';
+import { 
+  Cloud, HardDrive, FileText, Share2, Zap, Upload, Folder, 
+  Eye, Download, Trash2, MoreVertical, Loader, Activity as ActivityIcon 
+} from 'lucide-react';
 import ShareModal from '../components/common/ShareModal';
-import { Trash2 } from 'lucide-react';
 
 const Dashboard = () => {
-  const { refreshUser } = useAuth();
-  const [viewMode, setViewMode] = useState('list');
-  const [selectedFile, setSelectedFile] = useState(null);
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { addToast } = useToast();
+  
   const [files, setFiles] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [activities, setActivities] = useState([]);
+  const [loadingFiles, setLoadingFiles] = useState(true);
+  const [loadingActivities, setLoadingActivities] = useState(true);
+  
   const [uploading, setUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState('');
+  const [uploadStatus, setUploadStatus] = useState(null);
+  const fileInputRef = useRef(null);
+  
+  const [actionMenuOpen, setActionMenuOpen] = useState(null);
   const [shareFile, setShareFile] = useState(null);
-  const [showConfirmDelete, setShowConfirmDelete] = useState(null);
-  const [deletingId, setDeletingId] = useState(null);
-
-  const handleDelete = async (id) => {
-    try {
-      setShowConfirmDelete(null);
-      setDeletingId(id);
-      await fileService.deleteFile(id);
-      setFiles(files.filter(f => f._id !== id && f.id !== id));
-      if (selectedFile?._id === id || selectedFile?.id === id) {
-        setSelectedFile(null);
-      }
-    } catch (err) {
-      alert('Failed to delete file');
-    } finally {
-      setDeletingId(null);
-    }
-  };
 
   useEffect(() => {
     const controller = new AbortController();
     
     const loadData = async () => {
-      setLoading(true);
-      setError(null);
       try {
-        const filesData = await fileService.getFiles({ signal: controller.signal });
-        setFiles(Array.isArray(filesData) ? filesData : []);
-        // Also refresh user quota
-        await refreshUser();
+        const recentFiles = await fileService.getRecentFiles({ signal: controller.signal });
+        setFiles(Array.isArray(recentFiles) ? recentFiles.slice(0, 5) : []);
       } catch (err) {
-        if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') return;
-        console.error('Error fetching data:', err);
-        setError("We couldn't load your files. Please check your connection and try again.");
+        if (err.name !== 'CanceledError') {
+          addToast('Failed to load recent files', 'error');
+        }
       } finally {
-        setLoading(false);
+        setLoadingFiles(false);
+      }
+
+      try {
+        const result = await activityService.getActivity({ signal: controller.signal });
+        const acts = result?.data || [];
+        setActivities(Array.isArray(acts) ? acts.slice(0, 5) : []);
+      } catch (err) {
+        if (err.name !== 'CanceledError') {
+          addToast('Failed to load recent activity', 'error');
+        }
+      } finally {
+        setLoadingActivities(false);
       }
     };
-
+    
     loadData();
+    return () => controller.abort();
+  }, [addToast]);
 
-    return () => {
-      controller.abort();
-    };
-  }, []);
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 18) return 'Good afternoon';
+    return 'Good evening';
+  };
 
   const handleUpload = async (e) => {
-    const file = e.target.files?.[0];
+    const file = e.target.files[0];
     if (!file) return;
 
-    // Frontend validation: Maximum individual upload size = 10 MB
-    const MAX_FILE_SIZE = 10 * 1024 * 1024;
-    if (file.size > MAX_FILE_SIZE) {
-      setError('File exceeds the maximum upload size of 10 MB.');
-      e.target.value = '';
-      return;
-    }
-
-    setUploading(true);
-    setUploadStatus('Preparing upload...');
-    setError(null);
-
     try {
+      setUploading(true);
+      setUploadStatus({ statusText: 'Preparing...', progress: 0, fileName: file.name, loaded: 0, total: file.size });
+
       const formData = new FormData();
       formData.append('file', file);
-      
-      setUploadStatus({
-        fileName: file.name,
-        progress: 0,
-        loaded: 0,
-        total: file.size,
-        statusText: 'Preparing upload...'
+
+      await fileService.uploadFile(formData, (progressEvent) => {
+        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        setUploadStatus({
+          statusText: percentCompleted < 100 ? 'Uploading...' : 'Processing...',
+          progress: percentCompleted,
+          fileName: file.name,
+          loaded: progressEvent.loaded,
+          total: progressEvent.total
+        });
       });
 
-      const response = await fileService.uploadFile(formData, (progressEvent) => {
-        if (progressEvent.total) {
-          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-          setUploadStatus(prev => ({
-            ...prev,
-            progress: percentCompleted,
-            loaded: progressEvent.loaded,
-            statusText: percentCompleted === 100 ? 'Encrypting, chunking, and replicating...' : 'Uploading...'
-          }));
-        }
-      });
+      addToast('File uploaded successfully', 'success');
+      setUploadStatus(null);
       
-      setUploadStatus('');
-      await loadData();
-      
-      alert(`✓ Upload completed`);
+      const newFiles = await fileService.getRecentFiles();
+      setFiles(Array.isArray(newFiles) ? newFiles.slice(0, 5) : []);
+      const actsResult = await activityService.getActivity();
+      const acts = actsResult?.data || [];
+      setActivities(Array.isArray(acts) ? acts.slice(0, 5) : []);
 
     } catch (err) {
-      const msg = err.response?.data?.message || err.message;
-      const code = err.response?.data?.error || err.response?.data?.code;
-      if (code === 'STORED_FILE_LIMIT_EXCEEDED') {
-        setError(`File exceeds the 10 MB stored-file limit. This file could not be reduced below the 10 MB storage limit.`);
-      } else if (code === 'USER_STORAGE_QUOTA_EXCEEDED') {
-        setError(`Not enough storage. Please delete some files.`);
-      } else if (code === 'INSUFFICIENT_ELIGIBLE_NODES') {
-        setError(`Upload temporarily unavailable. Not enough healthy storage nodes are currently available to safely store your file. (Eligible nodes: ${err.response.data.eligibleNodes || 0}, Required: ${err.response.data.requiredNodes || 2})`);
-      } else {
-        setError(`Upload failed: ${msg}`);
-      }
+      addToast(err.userMessage || err.message || 'Upload failed', 'error');
+      setUploadStatus(null);
     } finally {
       setUploading(false);
-      e.target.value = '';
+      if (fileInputRef.current) fileInputRef.current.value = null;
     }
   };
 
-  const getFileIcon = (type) => {
-    switch (type?.toLowerCase()) {
-      case 'pdf': return <FileText className="text-red-500 w-8 h-8" />;
-      case 'excel': case 'xlsx': case 'csv': return <FileText className="text-green-500 w-8 h-8" />;
-      case 'figma': case 'png': case 'jpg': case 'jpeg': return <ImageIcon className="text-purple-500 w-8 h-8" />;
-      case 'word': case 'docx': case 'doc': return <FileText className="text-blue-500 w-8 h-8" />;
-      default: return <File className="text-gray-500 w-8 h-8" />;
+  const handleDelete = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this file?')) return;
+    try {
+      await fileService.deleteFile(id);
+      setFiles(files.filter(f => f._id !== id));
+      addToast('File deleted successfully', 'success');
+    } catch (err) {
+      addToast(err.message || 'Failed to delete file', 'error');
+    } finally {
+      setActionMenuOpen(null);
     }
   };
 
-  // Mock folders for UI since backend doesn't have folders yet
-  const folders = []; // Fixed: Using real backend state
+  const handleDownload = async (e, file) => {
+    e.stopPropagation();
+    try {
+      await fileService.downloadFile(file._id, getFileDisplayName(file));
+      addToast('Download started', 'success');
+      setActionMenuOpen(null);
+    } catch (err) {
+      addToast(err.message || 'Failed to download file', 'error');
+    }
+  };
+
+  const used = user?.usedStorage || 0;
+  const quota = user?.storageQuota || (100 * 1024 * 1024);
+  const percentage = Math.min(100, Math.round((used / quota) * 100)) || 0;
+  
+  let originalTotal = 0;
+  let storedTotal = 0;
+  files.forEach(f => {
+    originalTotal += (f.originalSize || f.size || 0);
+    storedTotal += (f.storedSize || f.size || 0);
+  });
+  const saved = originalTotal > storedTotal ? originalTotal - storedTotal : 0;
 
   return (
-    <div className="flex h-full relative">
-      <PageContainer className="flex-1 overflow-x-hidden">
-        <div className="flex items-center justify-between mb-2">
-          <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-            Your Workspace
+    <PageContainer>
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-[#17181C]">
+            {getGreeting()}, {user?.name?.split(' ')[0] || user?.email?.split('@')[0] || 'User'}!
           </h1>
-          <div className="relative">
-            <input 
-              type="file" 
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
-              onChange={handleUpload}
-              disabled={uploading}
-            />
-            <Button variant="primary">{uploading ? 'Uploading...' : 'Upload file'}</Button>
+          <p className="text-[#6F737D] text-sm mt-1">Your files are secure, distributed, and ready when you need them.</p>
+        </div>
+        <div>
+          <input type="file" ref={fileInputRef} className="hidden" onChange={handleUpload} disabled={uploading} />
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="bg-[#8178F2] hover:bg-[#6c63e6] text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-colors shadow-sm flex items-center gap-2"
+          >
+            {uploading ? <Loader className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            {uploading ? 'Uploading...' : 'Upload File'}
+          </button>
+        </div>
+      </div>
+
+      {uploadStatus && (
+        <div className="mb-6 p-4 border border-[#E7E9EF] rounded-xl bg-white shadow-sm max-w-2xl">
+          <div className="flex justify-between text-sm mb-2 text-[#17181C]">
+            <span className="font-medium">{uploadStatus.statusText}</span>
+            <span>{uploadStatus.progress}%</span>
+          </div>
+          <div className="w-full bg-[#F5F7FB] rounded-full h-2 mb-2 overflow-hidden">
+            <div className="bg-[#8178F2] h-full rounded-full transition-all duration-300" style={{ width: `${uploadStatus.progress}%` }}></div>
+          </div>
+          <div className="flex justify-between text-xs text-[#6F737D]">
+            <span className="truncate max-w-[250px]">{uploadStatus.fileName}</span>
+            <span>{formatBytes(uploadStatus.loaded)} / {formatBytes(uploadStatus.total)}</span>
           </div>
         </div>
-        <p className="text-gray-500 mb-6 text-sm">
-          Manage your files, monitor storage usage, and keep your digital workspace organized.
-        </p>
+      )}
 
-        {uploadStatus && (
-          <div className="mb-6 p-4 border border-gray-200 rounded-xl bg-gray-50 max-w-md">
-            <div className="flex justify-between text-sm mb-2 text-gray-700">
-              <span className="font-medium">{typeof uploadStatus === 'string' ? uploadStatus : uploadStatus.statusText}</span>
-              {typeof uploadStatus === 'object' && <span>{uploadStatus.progress}%</span>}
-            </div>
-            {typeof uploadStatus === 'object' && (
-              <>
-                <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
-                  <div className="bg-[#8178F2] h-2 rounded-full transition-all duration-300" style={{ width: `${uploadStatus.progress}%` }}></div>
-                </div>
-                <div className="flex justify-between text-xs text-gray-500">
-                  <span className="truncate max-w-[200px]">{uploadStatus.fileName}</span>
-                  <span>{(uploadStatus.loaded / 1024 / 1024).toFixed(1)} MB / {(uploadStatus.total / 1024 / 1024).toFixed(1)} MB</span>
-                </div>
-              </>
-            )}
+      {/* Stats Row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="bg-white p-5 rounded-xl border border-[#E7E9EF] shadow-sm flex items-center gap-4">
+          <div className="w-12 h-12 bg-[#8178F2]/10 rounded-full flex items-center justify-center text-[#8178F2] shrink-0">
+            <HardDrive className="w-6 h-6" />
           </div>
-        )}
-
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-xl flex items-start gap-3 text-red-600 text-sm">
-            <AlertCircle className="w-5 h-5 shrink-0" />
-            <span>{error}</span>
+          <div>
+            <p className="text-sm text-[#6F737D] font-medium">Storage Used</p>
+            <p className="text-lg font-bold text-[#17181C]">{formatBytes(used)}</p>
+            <p className="text-xs text-[#6F737D]">of {formatBytes(quota)}</p>
           </div>
-        )}
-
-        <section className="mb-8">
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Quick Folders</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {folders.map(folder => (
-              <div 
-                key={folder.id} 
-                className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-                  folder.active ? 'bg-[#f4f2ff] border-[#8178F2]/30' : 'bg-white border-gray-100 hover:border-[#8178F2]/30 hover:shadow-sm'
-                }`}
-              >
-                <div className="flex justify-between items-start mb-3">
-                  <div className={`p-2.5 rounded-xl ${folder.active ? 'bg-[#8178F2]/20' : 'bg-gray-50'}`}>
-                    <Folder className={`w-6 h-6 ${folder.active ? 'text-[#8178F2]' : 'text-gray-400'}`} />
-                  </div>
-                  <button className="text-gray-400 hover:text-gray-600"><MoreHorizontal className="w-5 h-5" /></button>
-                </div>
-                <h3 className="font-semibold text-gray-800 mb-1">{folder.name}</h3>
-                <div className="flex justify-between text-xs text-gray-500">
-                  <span>{folder.count} files</span>
-                  <span>{folder.storage}</span>
-                </div>
-              </div>
-            ))}
+        </div>
+        <div className="bg-white p-5 rounded-xl border border-[#E7E9EF] shadow-sm flex items-center gap-4">
+          <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-500 shrink-0">
+            <FileText className="w-6 h-6" />
           </div>
-        </section>
+          <div>
+            <p className="text-sm text-[#6F737D] font-medium">Total Files</p>
+            <p className="text-xl font-bold text-[#17181C]">{files.length}</p>
+          </div>
+        </div>
+        <div className="bg-white p-5 rounded-xl border border-[#E7E9EF] shadow-sm flex items-center gap-4">
+          <div className="w-12 h-12 bg-orange-50 rounded-full flex items-center justify-center text-orange-500 shrink-0">
+            <Share2 className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-sm text-[#6F737D] font-medium">Active Shares</p>
+            <p className="text-xl font-bold text-[#17181C]">N/A</p>
+          </div>
+        </div>
+        <div className="bg-white p-5 rounded-xl border border-[#E7E9EF] shadow-sm flex items-center gap-4">
+          <div className="w-12 h-12 bg-green-50 rounded-full flex items-center justify-center text-[#69B38A] shrink-0">
+            <Zap className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-sm text-[#6F737D] font-medium">Compression Saved</p>
+            <p className="text-xl font-bold text-[#17181C]">{formatBytes(saved)}</p>
+          </div>
+        </div>
+      </div>
 
-        <section>
+      {/* Storage Progress */}
+      <div className="bg-white p-6 rounded-xl border border-[#E7E9EF] shadow-sm mb-8 flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="flex-1 w-full">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[#17181C] font-semibold flex items-center gap-2"><Cloud className="w-5 h-5 text-[#8178F2]" /> Cloud Storage</span>
+            <span className="text-sm font-medium text-[#6F737D]">{percentage}% Used</span>
+          </div>
+          <div className="w-full bg-[#F5F7FB] rounded-full h-3">
+            <div className={`h-full rounded-full transition-all duration-500 ${percentage > 90 ? 'bg-[#E88B8B]' : 'bg-[#8178F2]'}`} style={{ width: `${percentage}%` }}></div>
+          </div>
+          <div className="flex justify-between text-xs text-[#6F737D] mt-2">
+            <span>{formatBytes(used)} used</span>
+            <span>{formatBytes(quota - used)} free</span>
+          </div>
+        </div>
+        <div className="hidden md:block w-px h-16 bg-[#E7E9EF]"></div>
+        <div className="flex gap-4">
+          <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-3 w-20 h-20 rounded-xl bg-[#F5F7FB] hover:bg-[#E7E9EF] transition-colors text-[#17181C] group">
+            <Upload className="w-6 h-6 text-[#8178F2] mb-1 group-hover:-translate-y-1 transition-transform" />
+            <span className="text-xs font-medium">Upload</span>
+          </button>
+          <button onClick={() => navigate('/files')} className="flex flex-col items-center justify-center p-3 w-20 h-20 rounded-xl bg-[#F5F7FB] hover:bg-[#E7E9EF] transition-colors text-[#17181C] group">
+            <Folder className="w-6 h-6 text-[#6F737D] mb-1 group-hover:scale-110 transition-transform" />
+            <span className="text-xs font-medium">My Files</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">Your Files</h2>
-            <div className="flex items-center bg-white rounded-lg border border-gray-200 p-1">
-              <button 
-                onClick={() => setViewMode('list')}
-                className={`p-1.5 rounded-md ${viewMode === 'list' ? 'bg-[#f4f2ff] text-[#8178F2]' : 'text-gray-400 hover:text-gray-600'}`}
-              >
-                <List className="w-4 h-4" />
-              </button>
-              <button 
-                onClick={() => setViewMode('grid')}
-                className={`p-1.5 rounded-md ${viewMode === 'grid' ? 'bg-[#f4f2ff] text-[#8178F2]' : 'text-gray-400 hover:text-gray-600'}`}
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="bg-white rounded-xl border border-gray-100 p-12 flex flex-col items-center justify-center text-gray-400">
-              <Loader2 className="w-8 h-8 animate-spin mb-3 text-[#8178F2]" />
-              <p>Loading your files...</p>
-            </div>
-          ) : files.length === 0 && !error ? (
-            <div className="bg-white rounded-xl border border-dashed border-gray-300 p-12 flex flex-col items-center justify-center text-center">
-              <div className="bg-purple-50 p-4 rounded-full mb-4">
-                <UploadCloud className="w-8 h-8 text-[#8178F2]" />
-              </div>
-              <h3 className="text-lg font-semibold text-gray-800 mb-1">Your workspace is empty</h3>
-              <p className="text-gray-500 text-sm max-w-sm mb-6">Upload your first file to start building your DFSS storage.</p>
-              
-              <div className="relative">
-                <input 
-                  type="file" 
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
-                  onChange={handleUpload}
-                  disabled={uploading}
-                />
-                <Button variant="primary">{uploading ? 'Uploading...' : 'Upload file'}</Button>
-              </div>
-              {uploadStatus && typeof uploadStatus === "string" && <p className="text-xs text-[#8178F2] mt-3">{uploadStatus}</p>}
-            </div>
-          ) : viewMode === 'list' ? (
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-gray-50 text-xs text-gray-500 uppercase border-b border-gray-100">
-                    <th className="px-6 py-4 font-medium">Name</th>
-                    <th className="px-6 py-4 font-medium">Date</th>
-                    <th className="px-6 py-4 font-medium">Size</th>
-                    <th className="px-6 py-4 font-medium">Owner</th>
-                    <th className="px-6 py-4 font-medium w-12"></th>
-                  </tr>
-                </thead>
-                <tbody className="text-sm">
-                  {files.map(file => (
-                    <tr 
-                      key={file._id || file.id} 
-                      className={`border-b border-gray-50 hover:bg-gray-50 cursor-pointer transition-colors ${deletingId === (file._id || file.id) ? 'opacity-50 pointer-events-none' : ''}`}
-                      onClick={() => setSelectedFile(file)}
-                    >
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3 relative">
-                          {deletingId === (file._id || file.id) && (
-                            <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-20">
-                              <Loader2 className="w-4 h-4 animate-spin text-gray-600" />
-                            </div>
-                          )}
-                          {getFileIcon(file.extension || file.type)}
-                          <span className="font-medium text-gray-700">{file.originalName || file.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-gray-500">{new Date(file.createdAt || file.date).toLocaleDateString()}</td>
-                      <td className="px-6 py-4 text-gray-500">{(file.size / 1024).toFixed(2)} KB</td>
-                      <td className="px-6 py-4 text-gray-500">{file.owner?.name || file.owner || 'You'}</td>
-                      <td className="px-6 py-4">
-                        <button className="text-gray-400 hover:text-gray-600"><MoreHorizontal className="w-5 h-5" /></button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {files.map(file => (
-                <div 
-                  key={file._id || file.id} 
-                  className={`bg-white p-4 rounded-xl border border-gray-100 hover:border-[#8178F2]/30 hover:shadow-sm cursor-pointer transition-all relative ${deletingId === (file._id || file.id) ? 'opacity-50 pointer-events-none' : ''}`}
-                  onClick={() => setSelectedFile(file)}
-                >
-                  {deletingId === (file._id || file.id) && (
-                    <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-20 rounded-xl">
-                      <Loader2 className="w-6 h-6 animate-spin text-gray-600" />
-                    </div>
-                  )}
-                  <div className="h-32 bg-gray-50 rounded-lg mb-3 flex items-center justify-center">
-                    {getFileIcon(file.extension || file.type)}
-                  </div>
-                  <div className="flex justify-between items-start mb-1">
-                    <h3 className="font-medium text-gray-800 truncate pr-2" title={file.originalName || file.name}>{file.originalName || file.name}</h3>
-                    <button className="text-gray-400 hover:text-gray-600"><MoreHorizontal className="w-4 h-4" /></button>
-                  </div>
-                  <p className="text-xs text-gray-500">{new Date(file.createdAt || file.date).toLocaleDateString()}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      </PageContainer>
-
-      {/* File Details Panel (Right Drawer) */}
-      {selectedFile && (
-        <div className="w-80 bg-white border-l border-gray-100 flex-shrink-0 flex flex-col absolute right-0 top-0 bottom-0 z-20 shadow-xl lg:relative lg:shadow-none transition-transform">
-          <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-            <h2 className="font-semibold text-gray-800">File Details</h2>
-            <button onClick={() => setSelectedFile(null)} className="text-gray-400 hover:text-gray-600 bg-white border border-gray-200 p-1.5 rounded-md shadow-sm">
-              <X className="w-4 h-4" />
-            </button>
+            <h2 className="text-lg font-bold text-[#17181C]">Recent Files</h2>
+            <button onClick={() => navigate('/recent')} className="text-sm text-[#8178F2] font-medium hover:underline">View All</button>
           </div>
           
-          <div className="flex-1 overflow-y-auto p-6">
-            <div className="flex flex-col items-center mb-6">
-              <div className="w-20 h-20 bg-gray-50 rounded-2xl flex items-center justify-center mb-3">
-                {getFileIcon(selectedFile.extension || selectedFile.type)}
+          <div className="bg-white border border-[#E7E9EF] rounded-xl overflow-hidden shadow-sm">
+            {loadingFiles ? (
+              <div className="p-8 text-center"><Loader className="w-6 h-6 animate-spin text-[#8178F2] mx-auto" /></div>
+            ) : files.length === 0 ? (
+              <div className="p-8 text-center text-[#6F737D]">
+                <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">No recent files.</p>
               </div>
-              <h3 className="font-medium text-center text-gray-800 px-2 break-all">{selectedFile.originalName || selectedFile.name}</h3>
-              <p className="text-xs text-gray-500 mt-1">{(selectedFile.size / 1024).toFixed(2)} KB • {selectedFile.mimetype || selectedFile.type}</p>
-            </div>
-
-            <div className="flex gap-2 mb-6 flex-wrap">
-              <Button variant="outline" className="flex-1 text-sm py-2 text-indigo-600 border-indigo-200 hover:bg-indigo-50" onClick={() => {
-                const token = localStorage.getItem('token');
-                const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-                window.open(`${baseUrl}/files/${selectedFile._id}/view?token=${token}`, '_blank');
-              }}>View</Button>
-              <Button variant="primary" className="flex-1 text-sm py-2" onClick={async () => {
-                try {
-                  await fileService.downloadFile(selectedFile._id, selectedFile.filename || selectedFile.originalName || selectedFile.name);
-                } catch (e) {
-                  alert(e.message || 'Failed to download');
-                }
-              }}>Download</Button>
-              <Button variant="outline" className="flex-1 text-sm py-2 text-gray-700 border-gray-200 hover:bg-gray-50" onClick={() => setShareFile(selectedFile)}>Share</Button>
-              <Button variant="outline" className="flex-1 text-sm py-2 text-red-500 border-red-200 hover:bg-red-50 hover:text-red-600" onClick={() => setShowConfirmDelete(selectedFile._id)}>Delete</Button>
-            </div>
-
-            <div className="space-y-6">
-              <section>
-                <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3 flex items-center gap-1"><Info className="w-3 h-3"/> Property</h4>
-                <div className="space-y-3 text-sm">
-                  <div className="flex justify-between"><span className="text-gray-500">Size</span><span className="font-medium text-gray-800">{(selectedFile.size / 1024).toFixed(2)} KB</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Type</span><span className="font-medium text-gray-800 truncate max-w-[120px]">{selectedFile.mimetype || selectedFile.type}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Owner</span><span className="font-medium text-gray-800">{selectedFile.owner?.name || 'You'}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Uploaded</span><span className="font-medium text-gray-800">{new Date(selectedFile.createdAt || selectedFile.date).toLocaleDateString()}</span></div>
-                </div>
-              </section>
-
-              <section>
-                <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3 flex items-center gap-1"><Settings className="w-3 h-3"/> System Details</h4>
-                <div className="space-y-3 text-sm">
-                  <div className="flex justify-between"><span className="text-gray-500">Chunks</span><span className="font-medium text-gray-800">{selectedFile.chunks || 3}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Replicas</span><span className="font-medium text-gray-800">{selectedFile.replicas || 2}</span></div>
-                </div>
-              </section>
-
-              <section>
-                <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3 flex items-center gap-1"><HardDrive className="w-3 h-3"/> Storage Information</h4>
-                <div className="bg-[#f8fafc] border border-gray-100 p-3 rounded-lg text-sm space-y-2">
-                  <div className="flex justify-between"><span className="text-gray-500 text-xs">Original size</span><span className="font-medium text-gray-500">{((selectedFile.originalSize || selectedFile.size) / 1024 / 1024).toFixed(2)} MB</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500 text-xs">Stored size</span><span className="font-medium text-[#8178F2]">{((selectedFile.storedSize || selectedFile.size) / 1024 / 1024).toFixed(2)} MB</span></div>
-                  {selectedFile.compressionApplied && (
-                    <>
-                      <div className="flex justify-between"><span className="text-gray-500 text-xs">Space saved</span><span className="font-medium text-green-600">{(selectedFile.spaceSavedBytes / 1024 / 1024).toFixed(2)} MB</span></div>
-                      <div className="flex justify-between border-t border-gray-200 pt-1 mt-1"><span className="text-gray-500 text-xs">Compression</span><span className="font-medium text-green-600">{((1 - selectedFile.compressionRatio) * 100).toFixed(1)}%</span></div>
-                    </>
-                  )}
-                  <div className="flex justify-between border-t border-gray-200 pt-1 mt-1"><span className="text-gray-500 text-xs">Encryption</span><span className="font-medium text-gray-800">✓ {selectedFile.encryptionInfo?.algorithm || 'AES-256'}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500 text-xs">Integrity</span><span className="font-medium text-gray-800">✓ SHA-256</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500 text-xs">Chunks</span><span className="font-medium text-gray-800">{selectedFile.chunkCount || selectedFile.chunks || 0}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500 text-xs">Replication</span><span className="font-medium text-gray-800">{selectedFile.replicationFactor || 2} copies</span></div>
-                </div>
-              </section>
-            </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-[#F8F9FC] text-xs text-[#6F737D] border-b border-[#E7E9EF]">
+                      <th className="px-5 py-3 font-medium">Name</th>
+                      <th className="px-5 py-3 font-medium">Size</th>
+                      <th className="px-5 py-3 font-medium">Date</th>
+                      <th className="px-5 py-3 font-medium text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-sm">
+                    {files.map(file => (
+                      <tr key={file._id} className="border-b border-[#F8F9FC] hover:bg-[#F8F9FC] cursor-pointer group" onClick={() => navigate(`/files/${file._id}/view`)}>
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-[#F8F9FC] rounded-lg group-hover:bg-white border border-transparent group-hover:border-[#E7E9EF]">
+                              {getFileIconComponent(file.mimeType)}
+                            </div>
+                            <div>
+                              <p className="font-medium text-[#17181C] truncate max-w-[180px]">{getFileDisplayName(file)}</p>
+                              <p className="text-xs text-[#6F737D]">{file.mimeType || 'Unknown Type'}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-3 text-[#6F737D] whitespace-nowrap">
+                          {formatBytes(file.storedSize || file.size)}
+                        </td>
+                        <td className="px-5 py-3 text-[#6F737D] whitespace-nowrap">{formatDate(file.updatedAt || file.createdAt)}</td>
+                        <td className="px-5 py-3 whitespace-nowrap text-right">
+                          <div className="flex items-center justify-end gap-1 relative">
+                            <button onClick={(e) => { e.stopPropagation(); navigate(`/files/${file._id}/view`); }} className="p-2 text-[#6F737D] hover:text-[#17181C] hover:bg-[#E7E9EF] rounded-lg" title="View"><Eye className="w-4 h-4" /></button>
+                            <button onClick={(e) => handleDownload(e, file)} className="p-2 text-[#6F737D] hover:text-[#17181C] hover:bg-[#E7E9EF] rounded-lg" title="Download"><Download className="w-4 h-4" /></button>
+                            <button onClick={(e) => { e.stopPropagation(); setActionMenuOpen(actionMenuOpen === file._id ? null : file._id); }} className="p-2 text-[#6F737D] hover:text-[#17181C] hover:bg-[#E7E9EF] rounded-lg"><MoreVertical className="w-4 h-4" /></button>
+                            
+                            {actionMenuOpen === file._id && (
+                              <div className="absolute right-0 top-10 w-36 bg-white rounded-xl shadow-lg border border-[#E7E9EF] z-10 py-1">
+                                <button onClick={(e) => { e.stopPropagation(); setShareFile(file); setActionMenuOpen(null); }} className="w-full px-4 py-2 text-sm text-[#17181C] hover:bg-[#F8F9FC] flex items-center gap-2"><Share2 className="w-4 h-4 text-[#6F737D]" /> Share</button>
+                                <button onClick={(e) => { e.stopPropagation(); handleDelete(file._id); }} className="w-full px-4 py-2 text-sm text-[#E88B8B] hover:bg-red-50 flex items-center gap-2"><Trash2 className="w-4 h-4" /> Delete</button>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
-      )}
 
-      {shareFile && (
-        <ShareModal file={shareFile} onClose={() => setShareFile(null)} />
-      )}
-
-      {showConfirmDelete && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden p-6 text-center">
-            <Trash2 className="w-12 h-12 text-red-500 mx-auto mb-4" />
-            <h2 className="text-lg font-bold text-gray-800 mb-2">Delete file permanently?</h2>
-            <p className="text-gray-600 text-sm mb-6">This action cannot be undone.</p>
-            <div className="flex gap-3 justify-center">
-              <button 
-                onClick={() => setShowConfirmDelete(null)}
-                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={() => handleDelete(showConfirmDelete)}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors"
-              >
-                Delete
-              </button>
-            </div>
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold text-[#17181C]">Recent Activity</h2>
+            <button onClick={() => navigate('/activity')} className="text-sm text-[#8178F2] font-medium hover:underline">View All</button>
+          </div>
+          
+          <div className="bg-white border border-[#E7E9EF] rounded-xl overflow-hidden shadow-sm p-5">
+            {loadingActivities ? (
+              <div className="py-4 text-center"><Loader className="w-5 h-5 animate-spin text-[#8178F2] mx-auto" /></div>
+            ) : activities.length === 0 ? (
+              <div className="py-8 text-center text-[#6F737D]">
+                <ActivityIcon className="w-6 h-6 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No recent activity.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {activities.map((act) => (
+                  <div key={act._id || act.id} className="flex gap-3 items-start">
+                    <div className="w-8 h-8 rounded-full bg-[#F5F7FB] flex items-center justify-center shrink-0">
+                      <ActivityIcon className="w-4 h-4 text-[#8178F2]" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-[#17181C]">{act.action}</p>
+                      <p className="text-xs text-[#6F737D] mt-0.5">{formatRelativeTime(act.createdAt || act.date)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
-      )}
-    </div>
+      </div>
+
+      {shareFile && <ShareModal file={shareFile} onClose={() => setShareFile(null)} />}
+    </PageContainer>
   );
 };
 
 export default Dashboard;
-
-

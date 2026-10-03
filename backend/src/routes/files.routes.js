@@ -8,6 +8,7 @@ const {
   getFiles,
   getShared,
   getFavorites,
+  toggleFavorite,
   getRecent,
   getExpired,
   uploadFile,
@@ -46,6 +47,7 @@ router.get('/', getFiles);
 router.post('/upload', upload.single('file'), uploadFile);
 router.get('/shared', getShared);
 router.get('/favorites', getFavorites);
+router.post('/:fileId/favorite', toggleFavorite);
 router.get('/recent', getRecent);
 router.get('/expired', getExpired);
 router.get('/:fileId', getFileDetails);

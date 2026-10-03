@@ -355,11 +355,47 @@ const downloadSharedFile = async (req, res, next) => {
 // ─────────────────────────────────────────
 // STUB ROUTES (to be implemented)
 // ─────────────────────────────────────────
-const getShared = async (req, res) =>
-  res.json({ success: true, data: [], message: 'Sharing not yet implemented' });
+const getShared = async (req, res, next) => {
+  try {
+    const shares = await ShareToken.find({ ownerId: req.user.id, status: 'active' }).populate('fileId');
+    // Group or map shares
+    const mapped = shares.map(share => ({
+      shareId: share._id,
+      token: 'hidden', // Token hash is in db, actual token is lost. Wait, backend only has tokenHash. 
+      // User can't see token again! They can only see the share ID, expiration, and file details.
+      file: share.fileId,
+      expiresAt: share.expiresAt,
+      views: share.views,
+      createdAt: share.createdAt
+    }));
+    res.json({ success: true, data: mapped });
+  } catch (err) {
+    next(err);
+  }
+};
 
-const getFavorites = async (req, res) =>
-  res.json({ success: true, data: [], message: 'Favorites not yet implemented' });
+const getFavorites = async (req, res, next) => {
+  try {
+    const files = await File.find({ owner: req.user.id, status: 'READY', isFavorite: true }).sort({ updatedAt: -1 });
+    res.json({ success: true, data: files });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const toggleFavorite = async (req, res, next) => {
+  try {
+    const file = await File.findOne({ _id: req.params.fileId, owner: req.user.id });
+    if (!file) {
+      return res.status(404).json({ success: false, code: 'FILE_NOT_FOUND', message: 'File not found' });
+    }
+    file.isFavorite = !file.isFavorite;
+    await file.save();
+    res.json({ success: true, data: file });
+  } catch (err) {
+    next(err);
+  }
+};
 
 const getRecent = async (req, res) => {
   try {
@@ -380,6 +416,7 @@ module.exports = {
   getFiles,
   getShared,
   getFavorites,
+  toggleFavorite,
   getRecent,
   getExpired,
   uploadFile,

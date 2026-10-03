@@ -3,7 +3,7 @@ import api from './api';
 export const getActivity = async (options = {}) => {
   const { signal, ...params } = options;
   const response = await api.get('/activity', { params, signal });
-  return response.data;
+  return response.data?.data || [];
 };
 
 export const getAdminActivity = async (params = {}) => {
