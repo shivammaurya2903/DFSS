@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import PageContainer from '../components/layout/PageContainer';
-import * as activityService from '../services/activity.service';
 import { Activity as ActivityIcon, Upload, Download, Eye, Share2, Trash2 } from 'lucide-react';
 import { formatRelativeTime } from '../utils/formatters';
-import { useToast } from '../context/ToastContext';
+import useActivity from '../hooks/useActivity';
 
 const ActionIcon = ({ action }) => {
   const actLower = action.toLowerCase();
@@ -16,45 +15,20 @@ const ActionIcon = ({ action }) => {
 };
 
 const Activity = () => {
-  const { addToast } = useToast();
-  const [activities, setActivities] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
+  const [page, setPage] = useState(1);
+  const { activities, pagination, loading } = useActivity({
+    page,
+    limit: 50,
+    action: filter === 'All' ? undefined : filter.toUpperCase(),
+  });
 
   const filters = ['All', 'Upload', 'Download', 'View', 'Share', 'Delete'];
-
-  useEffect(() => {
-    const controller = new AbortController();
-    
-    const loadActivities = async () => {
-      try {
-        setLoading(true);
-        const result = await activityService.getActivity({ signal: controller.signal });
-        const data = result?.data || [];
-        setActivities(Array.isArray(data) ? data : []);
-      } catch (err) {
-        if (err.name !== 'CanceledError') {
-          addToast('Failed to load activity log', 'error');
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    loadActivities();
-    
-    return () => controller.abort();
-  }, [addToast]);
-
-  const filteredActivities = activities.filter(act => {
-    if (filter === 'All') return true;
-    return act.action?.toLowerCase().includes(filter.toLowerCase());
-  });
 
   const groupActivitiesByDate = (acts) => {
     const groups = {};
     acts.forEach(act => {
-      const dateObj = new Date(act.createdAt || act.date);
+      const dateObj = new Date(act.timestamp || act.createdAt || act.date || Date.now());
       const today = new Date();
       const yesterday = new Date(today);
       yesterday.setDate(yesterday.getDate() - 1);
@@ -69,7 +43,7 @@ const Activity = () => {
     return groups;
   };
 
-  const groupedActivities = groupActivitiesByDate(filteredActivities);
+  const groupedActivities = groupActivitiesByDate(activities);
 
   return (
     <PageContainer>
@@ -82,7 +56,7 @@ const Activity = () => {
         {filters.map(f => (
           <button
             key={f}
-            onClick={() => setFilter(f)}
+            onClick={() => { setFilter(f); setPage(1); }}
             className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
               filter === f 
                 ? 'bg-[#8178F2] text-white' 
@@ -130,7 +104,7 @@ const Activity = () => {
                       <span className="text-sm font-medium text-[#17181C]">
                         {act.user && typeof act.user === 'object' ? (act.user.name || act.user.email) : (act.user || 'System')}
                       </span>
-                      <p className="text-xs text-[#6F737D] mt-0.5">{formatRelativeTime(act.createdAt || act.date)}</p>
+                      <p className="text-xs text-[#6F737D] mt-0.5">{formatRelativeTime(act.timestamp || act.createdAt || act.date)}</p>
                     </div>
                     
                     <div className="absolute left-0 md:relative md:left-auto flex items-center justify-center w-10 h-10 rounded-full border-4 border-[#F5F7FB] bg-white shadow-sm z-10">
@@ -143,7 +117,7 @@ const Activity = () => {
                         <span className="text-xs font-medium text-[#17181C] mr-2">
                           {act.user && typeof act.user === 'object' ? (act.user.name || act.user.email) : (act.user || 'System')}
                         </span>
-                        <span className="text-xs text-[#6F737D]">{formatRelativeTime(act.createdAt || act.date)}</span>
+                        <span className="text-xs text-[#6F737D]">{formatRelativeTime(act.timestamp || act.createdAt || act.date)}</span>
                       </div>
                     </div>
                   </div>
@@ -151,6 +125,28 @@ const Activity = () => {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {!loading && pagination && pagination.pages > 1 && (
+        <div className="flex items-center justify-between mt-8 text-sm text-[#6F737D]">
+          <span>Page {pagination.page} of {pagination.pages} ({pagination.total} events)</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="px-3 py-1.5 bg-white border border-[#E7E9EF] rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F5F7FB]"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage(p => Math.min(pagination.pages, p + 1))}
+              disabled={page >= pagination.pages}
+              className="px-3 py-1.5 bg-white border border-[#E7E9EF] rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#F5F7FB]"
+            >
+              Next
+            </button>
+          </div>
         </div>
       )}
     </PageContainer>

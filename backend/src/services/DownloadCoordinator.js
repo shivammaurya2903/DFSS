@@ -1,15 +1,17 @@
 const crypto = require('crypto');
 const zlib = require('zlib');
+const { Readable, Transform, PassThrough, pipeline } = require('stream');
 const File = require('../models/File');
 const Chunk = require('../models/Chunk');
 const StorageNode = require('../models/StorageNode');
 const AuditLog = require('../models/AuditLog');
 const StorageService = require('./StorageService');
 const config = require('../config');
+const { getFileKey, decryptChunk, sha256 } = require('../utils/encryption');
 
 const DownloadCoordinator = {
-  async download(opts) {
-    const { fileId, userId, requestId, res } = opts;
+  async _prepare(opts) {
+    const { fileId, userId } = opts;
     const timings = {};
     const globalStart = Date.now();
 
@@ -22,7 +24,7 @@ const DownloadCoordinator = {
       throw err;
     }
 
-    if (file.status === 'UPLOADING' || file.status === 'PROCESSING') {
+    if (!['READY', 'DEGRADED'].includes(file.status)) {
       const err = new Error('File is not ready for download');
       err.statusCode = 409;
       err.code = 'FILE_NOT_READY';
@@ -46,116 +48,148 @@ const DownloadCoordinator = {
     }
     timings.nodeSelectionTime = Date.now() - nodeSelStart;
 
+    let encryptionKey;
+    try {
+      encryptionKey = getFileKey(file);
+    } catch (err) {
+      throw Object.assign(
+        new Error('File encryption metadata is invalid or the encryption key changed'),
+        { code: 'ENCRYPTION_KEY_UNAVAILABLE', statusCode: 500 }
+      );
+    }
+
+    return { file, chunks, nodeMap, encryptionKey, timings, globalStart };
+  },
+
+  async _selectReadNode(chunk, nodeMap) {
+    const isReadable = (n) => n && (n.status === 'HEALTHY' || n.status === 'DEGRADED');
+    const primary = nodeMap[chunk.primaryNode];
+    if (isReadable(primary)) {
+      const url = primary.url || await StorageService.getNodeUrlFromDB(chunk.primaryNode) || StorageService.getNodeUrl(chunk.primaryNode);
+      if (url) return { nodeId: chunk.primaryNode, url };
+    }
+    for (const replicaId of (chunk.replicaNodes || [])) {
+      const replica = nodeMap[replicaId];
+      if (isReadable(replica)) {
+        const url = replica.url || await StorageService.getNodeUrlFromDB(replicaId) || StorageService.getNodeUrl(replicaId);
+        if (url) return { nodeId: replicaId, url };
+      }
+    }
+    return null;
+  },
+
+  /**
+   * Stream the decrypted, decompressed file with bounded memory.
+   * Chunks are fetched in small parallel batches; at most
+   * `parallelDownloads` chunks are buffered at once.
+   */
+  async downloadStream(opts) {
+    const { requestId, runId = null } = opts;
+    const { file, chunks, nodeMap, encryptionKey, timings, globalStart } =
+      await this._prepare(opts);
+
     const fetchStart = Date.now();
-    const parallelLimit = config.parallelDownloads;
-    const chunkBuffers = new Array(chunks.length);
+    const parallelLimit = Math.max(1, config.parallelDownloads || 2);
 
-    const selectReadNode = async (chunk) => {
-      const primary = nodeMap[chunk.primaryNode];
-      if (primary && (primary.status === 'HEALTHY' || primary.status === 'DEGRADED')) {
-        const url = primary.url || await StorageService.getNodeUrlFromDB(chunk.primaryNode) || StorageService.getNodeUrl(chunk.primaryNode);
-        if (url) return { nodeId: chunk.primaryNode, url };
-      }
-      for (const replicaId of (chunk.replicaNodes || [])) {
-        const replica = nodeMap[replicaId];
-        if (replica && (replica.status === 'HEALTHY' || replica.status === 'DEGRADED')) {
-          const url = replica.url || await StorageService.getNodeUrlFromDB(replicaId) || StorageService.getNodeUrl(replicaId);
-          if (url) return { nodeId: replicaId, url };
-        }
-      }
-      return null;
-    };
-
-    const fetchChunk = async (chunk, index) => {
-      const readNode = await selectReadNode(chunk);
+    const fetchChunk = async (chunk) => {
+      const readNode = await this._selectReadNode(chunk, nodeMap);
       if (!readNode) {
         throw Object.assign(
           new Error(`No healthy node available for chunk ${chunk.chunkId}`),
           { code: 'NODE_UNAVAILABLE' }
         );
       }
-
-      const data = await StorageService.readChunk(readNode.url, chunk.chunkId);
-      chunkBuffers[index] = data;
+      const encrypted = await StorageService.readChunk(readNode.url, chunk.chunkId);
+      return decryptChunk(encrypted, encryptionKey);
     };
 
-    for (let i = 0; i < chunks.length; i += parallelLimit) {
-      const batch = chunks.slice(i, i + parallelLimit);
-      await Promise.all(batch.map((chunk, batchIdx) => fetchChunk(chunk, i + batchIdx)));
-    }
-    timings.chunkFetchTime = Date.now() - fetchStart;
-
-    const decryptStart = Date.now();
-    const encryptionKey = Buffer.from(config.encryptionKey.padEnd(32, '0').slice(0, 32));
-    const decryptedChunks = [];
-
-    for (let i = 0; i < chunkBuffers.length; i++) {
-      const encryptedData = chunkBuffers[i];
-      const iv = encryptedData.slice(0, 16);
-      const ciphertext = encryptedData.slice(16);
-      const decipher = crypto.createDecipheriv('aes-256-cbc', encryptionKey, iv);
-      const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-
-      const verifyStart = Date.now();
-      const actualChecksum = crypto.createHash('sha256').update(decrypted).digest('hex');
-      if (actualChecksum !== chunks[i].checksum) {
-        throw Object.assign(
-          new Error(`Checksum mismatch for chunk ${chunks[i].chunkId}`),
-          { code: 'CHECKSUM_MISMATCH' }
-        );
+    const source = Readable.from((async function* generate() {
+      for (let i = 0; i < chunks.length; i += parallelLimit) {
+        const batch = chunks.slice(i, i + parallelLimit);
+        const decryptedBatch = await Promise.all(batch.map(fetchChunk));
+        for (let j = 0; j < decryptedBatch.length; j++) {
+          const decrypted = decryptedBatch[j];
+          const chunk = batch[j];
+          if (sha256(decrypted) !== chunk.checksum) {
+            throw Object.assign(
+              new Error(`Checksum mismatch for chunk ${chunk.chunkId}`),
+              { code: 'CHECKSUM_MISMATCH' }
+            );
+          }
+          yield decrypted;
+        }
       }
-      timings.checksumVerificationTime = (timings.checksumVerificationTime || 0) + (Date.now() - verifyStart);
-
-      decryptedChunks.push(decrypted);
-    }
-    timings.decryptionTime = Date.now() - decryptStart;
-
-    const reconstructStart = Date.now();
-    let fullBuffer = Buffer.concat(decryptedChunks);
-
-    if (file.compressionApplied) {
-      try {
-        fullBuffer = zlib.unzipSync(fullBuffer);
-      } catch (err) {
-        throw Object.assign(
-          new Error('File decompression failed'),
-          { code: 'DECOMPRESSION_FAILED' }
-        );
-      }
-    }
+    })());
 
     const shaToVerify = file.originalSha256 || file.checksum;
-    if (shaToVerify) {
-      const actualFileChecksum = crypto.createHash('sha256').update(fullBuffer).digest('hex');
-      if (actualFileChecksum !== shaToVerify) {
-        throw Object.assign(
-          new Error('File integrity check failed — file checksum mismatch'),
-          { code: 'INTEGRITY_CHECK_FAILED' }
-        );
-      }
-    }
-    timings.reconstructionTime = Date.now() - reconstructStart;
-
-    timings.totalDownloadTime = Date.now() - globalStart;
-    
-    const finalName = file.originalFileName || file.originalName || file.filename;
-
-    await AuditLog.create({
-      requestId,
-      userId,
-      action: 'DOWNLOAD',
-      status: 'SUCCESS',
-      fileId: file._id,
-      latencyMs: timings.totalDownloadTime,
-      metadata: {
-        originalName: finalName,
-        size: file.originalSize || file.size,
-        chunkCount: chunks.length,
-        timings,
+    const hasher = crypto.createHash('sha256');
+    const verifier = new Transform({
+      transform(chunkData, enc, callback) {
+        hasher.update(chunkData);
+        callback(null, chunkData);
+      },
+      flush(callback) {
+        if (shaToVerify && hasher.digest('hex') !== shaToVerify) {
+          return callback(Object.assign(
+            new Error('File integrity check failed - file checksum mismatch'),
+            { code: 'INTEGRITY_CHECK_FAILED' }
+          ));
+        }
+        callback();
       },
     });
 
-    return { fullBuffer, file, timings };
+    const output = new PassThrough();
+    const stages = [source];
+    if (file.compressionApplied) {
+      stages.push(zlib.createGunzip());
+    }
+    stages.push(verifier, output);
+
+    const finalName = file.originalFileName || file.originalName || file.filename;
+    const contentLength = file.compressionApplied
+      ? (file.originalSize || null)
+      : (file.storedSize || file.size || null);
+
+    pipeline(...stages, async (err) => {
+      timings.chunkFetchTime = Date.now() - fetchStart;
+      timings.totalDownloadTime = Date.now() - globalStart;
+      try {
+        await AuditLog.create({
+          requestId,
+          userId: opts.userId,
+          runId,
+          action: 'DOWNLOAD',
+          status: err ? 'FAILURE' : 'SUCCESS',
+          fileId: file._id,
+          reason: err ? err.message : undefined,
+          latencyMs: timings.totalDownloadTime,
+          metadata: {
+            originalName: finalName,
+            size: file.originalSize || file.size,
+            chunkCount: chunks.length,
+            timings,
+          },
+        });
+      } catch (auditErr) {
+        console.error('Failed to write download audit log:', auditErr.message);
+      }
+    });
+
+    return { file, stream: output, contentLength, timings };
+  },
+
+  /**
+   * Buffered convenience wrapper retained for internal experiment reads.
+   * User-facing endpoints should use downloadStream().
+   */
+  async download(opts) {
+    const { file, stream } = await this.downloadStream(opts);
+    const parts = [];
+    for await (const part of stream) {
+      parts.push(Buffer.from(part));
+    }
+    return { fullBuffer: Buffer.concat(parts), file };
   },
 };
 

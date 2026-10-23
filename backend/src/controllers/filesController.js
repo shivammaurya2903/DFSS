@@ -6,6 +6,7 @@ const StorageService = require('../services/StorageService');
 const StorageNode = require('../models/StorageNode');
 const UploadCoordinator = require('../services/UploadCoordinator');
 const DownloadCoordinator = require('../services/DownloadCoordinator');
+const config = require('../config');
 
 /**
  * FilesController
@@ -17,12 +18,53 @@ const DownloadCoordinator = require('../services/DownloadCoordinator');
 // ─────────────────────────────────────────
 // LIST FILES
 // ─────────────────────────────────────────
+const getUploadLimits = async (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      maxOriginalFileSize: config.maxOriginalFileSize,
+      maxStoredFileSize: config.maxStoredFileSize,
+      maxOriginalFileSizeMB: Math.floor(config.maxOriginalFileSize / (1024 * 1024)),
+      maxStoredFileSizeMB: Math.floor(config.maxStoredFileSize / (1024 * 1024)),
+      chunkSize: config.chunkSizeBytes,
+      defaultStorageQuota: config.defaultStorageQuota,
+      replicationFactor: config.replicationFactor,
+    },
+  });
+};
+
 const getFiles = async (req, res, next) => {
   try {
-    const files = await File.find({ owner: req.user.id })
-      .select('-chunks')
-      .sort({ createdAt: -1 });
-    res.json({ success: true, data: files });
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 200);
+    const filter = {
+      owner: req.user.id,
+      status: { $in: ['READY', 'DEGRADED'] },
+    };
+
+    if (req.query.search) {
+      const escaped = String(req.query.search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = [
+        { filename: { $regex: escaped, $options: 'i' } },
+        { originalName: { $regex: escaped, $options: 'i' } },
+        { originalFileName: { $regex: escaped, $options: 'i' } },
+      ];
+    }
+
+    const [files, total] = await Promise.all([
+      File.find(filter)
+        .select('-chunks')
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit),
+      File.countDocuments(filter),
+    ]);
+
+    res.json({
+      success: true,
+      data: files,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
   } catch (err) {
     next(err);
   }
@@ -84,23 +126,37 @@ const getFileDetails = async (req, res, next) => {
 // ─────────────────────────────────────────
 // DOWNLOAD FILE
 // ─────────────────────────────────────────
+async function streamFileResponse(req, res, next, { fileId, userId, disposition }) {
+  const { file, stream, contentLength } = await DownloadCoordinator.downloadStream({
+    fileId,
+    userId,
+    requestId: req.requestId,
+  });
+
+  const finalName = file.originalFileName || file.originalName || file.filename;
+  res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(finalName)}"`);
+  res.setHeader('Content-Type', file.originalMimeType || file.mimeType || 'application/octet-stream');
+  if (contentLength) {
+    res.setHeader('Content-Length', contentLength);
+  }
+
+  stream.on('error', (err) => {
+    if (!res.headersSent) next(err);
+    else res.destroy(err);
+  });
+  res.on('close', () => stream.destroy());
+  stream.pipe(res);
+}
+
 const downloadFile = async (req, res, next) => {
   try {
-    const { fullBuffer, file } = await DownloadCoordinator.download({
+    await streamFileResponse(req, res, next, {
       fileId: req.params.fileId,
       userId: req.user.id,
-      requestId: req.requestId,
-      res,
+      disposition: 'attachment',
     });
-    const finalName = file.originalFileName || file.originalName || file.filename;
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(finalName)}"`);
-    res.setHeader('Content-Type', file.originalMimeType || file.mimeType || 'application/octet-stream');
-    res.setHeader('Content-Length', fullBuffer.length);
-    res.send(fullBuffer);
   } catch (err) {
-    if (!res.headersSent) {
-      next(err);
-    }
+    if (!res.headersSent) next(err);
   }
 };
 
@@ -109,26 +165,13 @@ const downloadFile = async (req, res, next) => {
 // ─────────────────────────────────────────
 const viewFile = async (req, res, next) => {
   try {
-    const { fullBuffer, file } = await DownloadCoordinator.download({
+    await streamFileResponse(req, res, next, {
       fileId: req.params.fileId,
       userId: req.user.id,
-      requestId: req.requestId,
-      res,
+      disposition: 'inline',
     });
-    const finalName = file.originalFileName || file.originalName || file.filename;
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(finalName)}"`);
-    let mime = file.originalMimeType || file.mimeType;
-    if (!mime || mime === 'application/octet-stream') {
-      // Fallback if genuinely unknown, though instructions say "Never return application/octet-stream for view unless it's genuinely unknown."
-      mime = 'application/octet-stream';
-    }
-    res.setHeader('Content-Type', mime);
-    res.setHeader('Content-Length', fullBuffer.length);
-    res.send(fullBuffer);
   } catch (err) {
-    if (!res.headersSent) {
-      next(err);
-    }
+    if (!res.headersSent) next(err);
   }
 };
 
@@ -185,7 +228,8 @@ const deleteFile = async (req, res, next) => {
       status: errors.length === 0 ? 'SUCCESS' : 'FAILURE',
       fileId: file._id,
       reason: errors.length > 0 ? errors.join('; ') : undefined,
-    }).catch(() => {});
+      metadata: { filename: file.originalFileName || file.originalName || file.filename },
+    });
 
     res.json({
       success: true,
@@ -200,14 +244,46 @@ const deleteFile = async (req, res, next) => {
 // ─────────────────────────────────────────
 // SHARING
 // ─────────────────────────────────────────
+const shareUrlFor = (token) => `${config.frontendUrl.replace(/\/$/, '')}/shared/${token}`;
+
+const serializeShare = (share, file = null) => {
+  const now = new Date();
+  const token = ShareToken.getTokenForShare(share);
+  const revoked = Boolean(share.revokedAt);
+  const expired = share.expiresAt ? new Date(share.expiresAt) <= now : false;
+  const fileName = file
+    ? (file.originalFileName || file.originalName || file.filename)
+    : null;
+
+  return {
+    shareId: share._id,
+    _id: share._id,
+    file: file || share.fileId,
+    fileName,
+    token,
+    shareUrl: token ? shareUrlFor(token) : null,
+    linkAvailable: Boolean(token),
+    expiresAt: share.expiresAt,
+    createdAt: share.createdAt,
+    revokedAt: share.revokedAt,
+    sharedWithEmail: share.sharedWithEmail,
+    permission: share.permission,
+    isExpired: expired,
+    isRevoked: revoked,
+    status: revoked ? 'REVOKED' : (expired ? 'EXPIRED' : 'ACTIVE'),
+  };
+};
+
 const createShare = async (req, res, next) => {
   try {
     const file = await File.findOne({ _id: req.params.fileId, owner: req.user.id });
     if (!file) {
       return res.status(404).json({ success: false, code: 'FILE_NOT_FOUND', message: 'File not found' });
     }
+    if (!['READY', 'DEGRADED'].includes(file.status)) {
+      return res.status(409).json({ success: false, code: 'FILE_NOT_READY', message: 'File is not ready to share' });
+    }
 
-    const { token, tokenHash } = ShareToken.generateToken();
     let expiresAt = new Date();
     const exp = req.body.expiresIn;
     
@@ -220,46 +296,29 @@ const createShare = async (req, res, next) => {
     } else if (exp === '30d') {
       expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     } else if (exp === 'never') {
-      expiresAt = new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000); // 100 years
+      expiresAt = null;
     } else if (req.body.expiresInDays) {
-      expiresAt.setDate(expiresAt.getDate() + req.body.expiresInDays);
+      expiresAt.setDate(expiresAt.getDate() + Number(req.body.expiresInDays));
     } else {
       expiresAt.setDate(expiresAt.getDate() + 7);
     }
 
-    const share = await ShareToken.create({
+    const share = new ShareToken({
       fileId: file._id,
       ownerId: req.user.id,
-      tokenHash,
+      tokenHash: `pending-${Date.now()}-${Math.random()}`,
       expiresAt,
       permission: req.body.permission || 'viewer',
       sharedWithEmail: req.body.email || null,
     });
 
-    const host = req.headers.host || 'localhost';
-    const protocol = req.secure ? 'https' : 'http';
-    const shareUrl = `${protocol}://${host}/shared/${token}`;
+    const token = ShareToken.deriveToken(share._id);
+    share.tokenHash = ShareToken.hashToken(token);
+    await share.save();
 
     res.status(201).json({
       success: true,
-      data: {
-        shareId: share._id,
-        _id: share._id,
-        token,
-        tokenHash,
-        shareUrl,
-        expiresAt,
-        createdAt: share.createdAt,
-        file: {
-          _id: file._id,
-          filename: file.originalFileName || file.originalName || file.filename,
-          originalName: file.originalFileName || file.originalName || file.filename,
-          mimeType: file.originalMimeType || file.mimeType,
-          size: file.size,
-          storedSize: file.storedSize || file.size,
-        },
-        fileName: file.originalFileName || file.originalName || file.filename,
-      }
+      data: serializeShare(share, file),
     });
   } catch (err) {
     next(err);
@@ -268,8 +327,20 @@ const createShare = async (req, res, next) => {
 
 const getFileShares = async (req, res, next) => {
   try {
-    const shares = await ShareToken.find({ fileId: req.params.fileId, ownerId: req.user.id });
-    res.json({ success: true, data: shares });
+    const file = await File.findOne({ _id: req.params.fileId, owner: req.user.id })
+      .select('originalName originalFileName filename mimeType originalMimeType size storedSize');
+    if (!file) {
+      return res.status(404).json({ success: false, code: 'FILE_NOT_FOUND', message: 'File not found' });
+    }
+
+    const shares = await ShareToken.find({
+      fileId: req.params.fileId,
+      ownerId: req.user.id,
+      revokedAt: null,
+      $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }],
+    }).sort({ createdAt: -1 });
+
+    res.json({ success: true, data: shares.map(share => serializeShare(share, file)) });
   } catch (err) {
     next(err);
   }
@@ -311,12 +382,37 @@ const getSharedFile = async (req, res, next) => {
       return res.status(403).json({ success: false, code: 'INVALID_SHARE', message: 'Invalid or expired share link' });
     }
 
-    const file = await File.findById(share.fileId).select('-chunks');
+    const file = await File.findOne({ _id: share.fileId, status: { $in: ['READY', 'DEGRADED'] } })
+      .select('filename originalName originalFileName mimeType originalMimeType size originalSize storedSize compressionApplied status createdAt');
     if (!file) {
       return res.status(404).json({ success: false, code: 'FILE_NOT_FOUND', message: 'File not found' });
     }
 
-    res.json({ success: true, data: file });
+    res.json({
+      success: true,
+      data: {
+        _id: file._id,
+        filename: file.filename,
+        originalName: file.originalName,
+        originalFileName: file.originalFileName,
+        mimeType: file.mimeType,
+        originalMimeType: file.originalMimeType,
+        size: file.size,
+        originalSize: file.originalSize,
+        storedSize: file.storedSize,
+        compressionApplied: file.compressionApplied,
+        status: file.status,
+        createdAt: file.createdAt,
+        expiresAt: share.expiresAt,
+        permission: share.permission,
+        sharedAt: share.createdAt,
+      },
+      share: {
+        expiresAt: share.expiresAt,
+        permission: share.permission,
+        createdAt: share.createdAt,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -336,22 +432,11 @@ const viewSharedFile = async (req, res, next) => {
       return res.status(404).json({ success: false, code: 'FILE_NOT_FOUND', message: 'File not found' });
     }
 
-    const { fullBuffer, file } = await DownloadCoordinator.download({
+    await streamFileResponse(req, res, next, {
       fileId: share.fileId,
       userId: fileMeta.owner,
-      requestId: req.requestId,
-      res,
+      disposition: 'inline',
     });
-    
-    const finalName = file.originalFileName || file.originalName || file.filename;
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(finalName)}"`);
-    let mime = file.originalMimeType || file.mimeType;
-    if (!mime || mime === 'application/octet-stream') {
-      mime = 'application/octet-stream';
-    }
-    res.setHeader('Content-Type', mime);
-    res.setHeader('Content-Length', fullBuffer.length);
-    res.send(fullBuffer);
   } catch (err) {
     if (!res.headersSent) {
       next(err);
@@ -373,18 +458,11 @@ const downloadSharedFile = async (req, res, next) => {
       return res.status(404).json({ success: false, code: 'FILE_NOT_FOUND', message: 'File not found' });
     }
 
-    const { fullBuffer, file } = await DownloadCoordinator.download({
+    await streamFileResponse(req, res, next, {
       fileId: share.fileId,
       userId: fileMeta.owner,
-      requestId: req.requestId,
-      res,
+      disposition: 'attachment',
     });
-
-    const finalName = file.originalFileName || file.originalName || file.filename;
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(finalName)}"`);
-    res.setHeader('Content-Type', file.originalMimeType || file.mimeType || 'application/octet-stream');
-    res.setHeader('Content-Length', fullBuffer.length);
-    res.send(fullBuffer);
   } catch (err) {
     if (!res.headersSent) {
       next(err);
@@ -401,20 +479,12 @@ const getShared = async (req, res, next) => {
     const shares = await ShareToken.find({
       ownerId: req.user.id,
       revokedAt: null,
-      expiresAt: { $gt: now }
+      $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
     }).populate('fileId');
 
     const mapped = shares
       .filter(s => s.fileId != null)
-      .map(share => ({
-        shareId: share._id,
-        _id: share._id,
-        file: share.fileId,
-        expiresAt: share.expiresAt,
-        createdAt: share.createdAt,
-        sharedWithEmail: share.sharedWithEmail,
-        permission: share.permission,
-      }));
+      .map(share => serializeShare(share, share.fileId));
     res.json({ success: true, data: mapped });
   } catch (err) {
     next(err);
@@ -469,16 +539,7 @@ const getExpired = async (req, res, next) => {
 
     const mapped = expiredShares
       .filter(s => s.fileId != null)
-      .map(share => ({
-        shareId: share._id,
-        _id: share._id,
-        file: share.fileId,
-        expiresAt: share.expiresAt,
-        revokedAt: share.revokedAt,
-        createdAt: share.createdAt,
-        isRevoked: !!share.revokedAt,
-        isExpired: share.expiresAt ? new Date(share.expiresAt) <= now : false
-      }));
+      .map(share => serializeShare(share, share.fileId));
 
     res.json({ success: true, data: mapped });
   } catch (err) {
@@ -488,6 +549,7 @@ const getExpired = async (req, res, next) => {
 
 module.exports = {
   getFiles,
+  getUploadLimits,
   getShared,
   getFavorites,
   toggleFavorite,

@@ -6,12 +6,27 @@ import api from './api';
  */
 
 export const getFiles = async (options = {}) => {
-  const response = await api.get('/files', options);
+  const { signal, ...params } = options;
+  const response = await api.get('/files', { params, signal });
   return response.data?.data || [];
+};
+
+export const getFilesPage = async (options = {}) => {
+  const { signal, ...params } = options;
+  const response = await api.get('/files', { params, signal });
+  return {
+    data: response.data?.data || [],
+    pagination: response.data?.pagination || null,
+  };
 };
 
 export const getFileDetails = async (fileId) => {
   const response = await api.get(`/files/${fileId}`);
+  return response.data?.data || null;
+};
+
+export const getUploadLimits = async () => {
+  const response = await api.get('/files/limits');
   return response.data?.data || null;
 };
 
@@ -66,8 +81,9 @@ export const toggleFavorite = async (fileId) => {
   return response.data?.data;
 };
 
-export const getRecentFiles = async () => {
-  const response = await api.get('/files/recent');
+export const getRecentFiles = async (options = {}) => {
+  const { signal } = options;
+  const response = await api.get('/files/recent', { signal });
   return response.data?.data || [];
 };
 

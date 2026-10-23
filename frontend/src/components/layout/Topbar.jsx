@@ -48,7 +48,7 @@ const Topbar = ({ toggleSidebar }) => {
           setSystemStatus('unavailable');
           return;
         }
-        const hasDown = nodes.some(n => n.status === 'DOWN');
+        const hasDown = nodes.some(n => ['OFFLINE', 'DOWN'].includes(n.status));
         const hasDegraded = nodes.some(n => n.status === 'DEGRADED');
         if (hasDown) setSystemStatus('unavailable');
         else if (hasDegraded) setSystemStatus('degraded');
@@ -101,7 +101,8 @@ const Topbar = ({ toggleSidebar }) => {
     setUploadProgress(0);
     try {
       await fileService.uploadFile(formData, (progressEvent) => {
-        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        const total = progressEvent.total || file.size || 1;
+        const percentCompleted = Math.min(100, Math.round((progressEvent.loaded * 100) / total));
         setUploadProgress(percentCompleted);
       });
       addToast('File uploaded successfully', 'success');
@@ -111,7 +112,7 @@ const Topbar = ({ toggleSidebar }) => {
          setTimeout(() => window.location.reload(), 1000);
       }
     } catch (err) {
-      addToast('Upload failed', 'error');
+      addToast(err.response?.data?.message || err.userMessage || 'Upload failed', 'error');
       setUploadProgress(null);
     }
     

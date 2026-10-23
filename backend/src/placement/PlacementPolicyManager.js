@@ -2,6 +2,7 @@ const StorageNode = require('../models/StorageNode');
 const PlacementDecision = require('../models/PlacementDecision');
 const roundRobin = require('./RoundRobinStrategy');
 const performanceAware = require('./PerformanceAwareStrategy');
+const performanceSecurity = require('./PerformanceSecurityStrategy');
 const proposedAdaptive = require('./ProposedAdaptiveStrategy');
 const crypto = require('crypto');
 const config = require('../config');
@@ -19,9 +20,10 @@ const config = require('../config');
  */
 
 const strategyMap = {
-  ROUND_ROBIN:       roundRobin,
-  PERFORMANCE_AWARE: performanceAware,
-  ADAPTIVE:          proposedAdaptive,
+  ROUND_ROBIN:         roundRobin,
+  PERFORMANCE_AWARE:   performanceAware,
+  PERFORMANCE_SECURITY: performanceSecurity,
+  ADAPTIVE:            proposedAdaptive,
 };
 
 const PlacementPolicyManager = {

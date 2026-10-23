@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Download, Share2, MoreVertical, 
   File as FileIcon, AlertCircle, Loader, Copy,
-  Info, Trash2, X
+  Info, Trash2, X, Music
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import ConfirmModal from '../components/common/ConfirmModal';
@@ -11,6 +11,8 @@ import ShareModal from '../components/common/ShareModal';
 import { getFileDetails, getFileBlob, downloadFile, deleteFile } from '../services/file.service';
 import { formatBytes, formatDate, getFileDisplayName } from '../utils/formatters';
 import { getFileIconComponent, getFileColorClass } from '../utils/fileIcons';
+
+const MAX_PREVIEW_BYTES = 25 * 1024 * 1024;
 
 const FileViewer = () => {
   const { fileId } = useParams();
@@ -54,8 +56,19 @@ const FileViewer = () => {
         const fileData = await getFileDetails(fileId);
         setFile(fileData);
         
-        const blob = await getFileBlob(fileId);
         const mime = fileData.mimeType || '';
+        const isPreviewableType = mime.startsWith('image/') ||
+          mime.startsWith('video/') ||
+          mime.startsWith('audio/') ||
+          mime.startsWith('text/') ||
+          mime === 'application/pdf' ||
+          mime === 'application/json' ||
+          mime === 'application/javascript' ||
+          mime === 'application/xml';
+        const tooLarge = (fileData.originalSize || fileData.size || 0) > MAX_PREVIEW_BYTES;
+        if (!isPreviewableType || tooLarge) return;
+        
+        const blob = await getFileBlob(fileId);
         
         const isTextType = mime.startsWith('text/') || 
                            mime === 'application/json' || 
@@ -147,11 +160,12 @@ const FileViewer = () => {
   }
 
   const mime = file?.mimeType || '';
-  const isImage = mime.startsWith('image/');
-  const isPdf = mime === 'application/pdf';
-  const isVideo = mime.startsWith('video/');
-  const isAudio = mime.startsWith('audio/');
+  const isImage = mime.startsWith('image/') && blobUrl;
+  const isPdf = mime === 'application/pdf' && blobUrl;
+  const isVideo = mime.startsWith('video/') && blobUrl;
+  const isAudio = mime.startsWith('audio/') && blobUrl;
   const isText = textContent !== null;
+  const isTooLargeToPreview = (file?.originalSize || file?.size || 0) > MAX_PREVIEW_BYTES;
   const filename = getFileDisplayName(file);
 
   return (
@@ -304,7 +318,7 @@ const FileViewer = () => {
                   <Music className="w-16 h-16 text-[#8178F2]" />
                 </div>
                 <h2 className="text-xl font-bold text-white mb-2 truncate px-4">{filename}</h2>
-                <p className="text-gray-400 text-sm mb-8">{formatBytes(file.size)}</p>
+                <p className="text-gray-400 text-sm mb-8">{formatBytes(file.originalSize || file.size)}</p>
                 <audio src={blobUrl} controls className="w-full accent-[#8178F2]" />
               </div>
             ) : (
@@ -314,10 +328,14 @@ const FileViewer = () => {
                 </div>
                 <h2 className="text-lg font-bold text-gray-800 mb-2 truncate px-2" title={filename}>{filename}</h2>
                 <div className="text-sm text-gray-500 mb-2">{mime || 'Unknown type'}</div>
-                <div className="text-sm text-gray-700 font-medium mb-8">{formatBytes(file.size)}</div>
+                <div className="text-sm text-gray-700 font-medium mb-8">{formatBytes(file.originalSize || file.size)}</div>
                 
                 <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 mb-8">
-                  <p className="text-gray-600 text-sm">This file type cannot be previewed in the browser.</p>
+                  <p className="text-gray-600 text-sm">
+                    {isTooLargeToPreview
+                      ? 'Preview is unavailable for files larger than 25 MB.'
+                      : 'This file type cannot be previewed in the browser.'}
+                  </p>
                 </div>
                 
                 <button 
@@ -371,7 +389,7 @@ const FileViewer = () => {
                 <div className="space-y-2">
                   <div className="flex justify-between">
                     <span className="text-gray-600">Original Size:</span>
-                    <span className="font-medium text-gray-800">{formatBytes(file.size)}</span>
+                    <span className="font-medium text-gray-800">{formatBytes(file.originalSize || file.size)}</span>
                   </div>
                   
                   {file.compressionApplied && (
@@ -383,7 +401,7 @@ const FileViewer = () => {
                       <div className="flex justify-between items-center mt-1">
                         <span className="text-gray-600">Status:</span>
                         <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-green-50 text-green-700 border border-green-100">
-                          Optimized (-{Math.round((1 - file.storedSize / file.size) * 100)}%)
+                          Optimized (-{Math.round((1 - file.storedSize / (file.originalSize || file.size)) * 100)}%)
                         </span>
                       </div>
                     </>

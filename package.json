@@ -1,0 +1,20 @@
+{
+  "name": "dfss",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Distributed File Storage System - root task runner",
+  "scripts": {
+    "install:all": "npm install --prefix backend && npm install --prefix frontend",
+    "dev:backend": "npm start --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:node1": "npm start --prefix storage-nodes/node-1",
+    "dev:node2": "npm start --prefix storage-nodes/node-2",
+    "dev:node3": "npm start --prefix storage-nodes/node-3",
+    "dev:node4": "npm start --prefix storage-nodes/node-4",
+    "build": "npm run build --prefix frontend",
+    "test": "npm test --prefix backend -- --runInBand",
+    "test:frontend": "npm test --prefix frontend",
+    "test:all": "npm test && npm run test:frontend",
+    "create-admin": "node scripts/create-admin.js"
+  }
+}

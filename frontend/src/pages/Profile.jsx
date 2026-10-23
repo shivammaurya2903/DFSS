@@ -1,13 +1,36 @@
-import React from 'react';
+import React, { useState } from 'react';
 import PageContainer from '../components/layout/PageContainer';
-import { Mail, Shield, HardDrive, Calendar, LogOut } from 'lucide-react';
+import { Mail, Shield, HardDrive, Calendar, LogOut, Pencil, Save, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { useNavigate } from 'react-router-dom';
-import { formatBytes, formatDate } from '../utils/formatters';
+import { formatBytes } from '../utils/formatters';
 
 const Profile = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
+  const { addToast } = useToast();
   const navigate = useNavigate();
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ name: user?.name || '', email: user?.email || '' });
+
+  const startEditing = () => {
+    setForm({ name: user?.name || '', email: user?.email || '' });
+    setEditing(true);
+  };
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      await updateUser({ name: form.name, email: form.email });
+      setEditing(false);
+      addToast('Profile updated successfully.', 'success');
+    } catch (err) {
+      addToast(err.response?.data?.message || 'Failed to update profile.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleLogout = () => {
     logout();
@@ -15,7 +38,7 @@ const Profile = () => {
   };
 
   const used = user?.usedStorage || 0;
-  const quota = user?.storageQuota || (100 * 1024 * 1024);
+  const quota = user?.storageQuota || (1024 * 1024 * 1024);
   const percentage = Math.min(100, Math.round((used / quota) * 100)) || 0;
 
   return (
@@ -45,17 +68,48 @@ const Profile = () => {
               </div>
             </div>
             <div className="p-6">
-              <h3 className="text-sm font-semibold text-[#17181C] uppercase tracking-wider mb-4">Personal Information</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-[#17181C] uppercase tracking-wider">Personal Information</h3>
+                {editing ? (
+                  <div className="flex items-center gap-2">
+                    <button onClick={handleSave} disabled={saving} className="text-sm font-medium text-[#8178F2] hover:underline flex items-center gap-1 disabled:opacity-50">
+                      <Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save'}
+                    </button>
+                    <button onClick={() => setEditing(false)} disabled={saving} className="text-sm font-medium text-[#6F737D] hover:underline flex items-center gap-1">
+                      <X className="w-4 h-4" /> Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={startEditing} className="text-sm font-medium text-[#8178F2] hover:underline flex items-center gap-1">
+                    <Pencil className="w-4 h-4" /> Edit
+                  </button>
+                )}
+              </div>
               <div className="space-y-4">
                 <div className="flex items-center gap-4 bg-[#F8F9FC] p-4 rounded-lg border border-[#E7E9EF]">
                   <div className="w-10 h-10 bg-white rounded-full shadow-sm flex items-center justify-center text-[#6F737D]">
                     <Mail className="w-5 h-5" />
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <p className="text-xs text-[#6F737D] font-medium uppercase">Email Address</p>
-                    <p className="font-medium text-[#17181C]">{user?.email}</p>
+                    {editing ? (
+                      <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="mt-1 w-full px-3 py-2 border border-[#E7E9EF] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#8178F2]" />
+                    ) : (
+                      <p className="font-medium text-[#17181C]">{user?.email}</p>
+                    )}
                   </div>
                 </div>
+                {editing && (
+                  <div className="flex items-center gap-4 bg-[#F8F9FC] p-4 rounded-lg border border-[#E7E9EF]">
+                    <div className="w-10 h-10 bg-white rounded-full shadow-sm flex items-center justify-center text-[#6F737D]">
+                      <Pencil className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-xs text-[#6F737D] font-medium uppercase">Display Name</p>
+                      <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="mt-1 w-full px-3 py-2 border border-[#E7E9EF] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#8178F2]" />
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center gap-4 bg-[#F8F9FC] p-4 rounded-lg border border-[#E7E9EF]">
                   <div className="w-10 h-10 bg-white rounded-full shadow-sm flex items-center justify-center text-[#6F737D]">
                     <Shield className="w-5 h-5" />

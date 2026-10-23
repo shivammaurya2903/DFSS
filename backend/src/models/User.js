@@ -39,7 +39,15 @@ const UserSchema = new mongoose.Schema({
   },
   storageQuota: {
     type: Number,
-    default: 100 * 1024 * 1024, // 100 MB default
+    default: () => require('../config').defaultStorageQuota,
+  },
+  failedLoginAttempts: {
+    type: Number,
+    default: 0,
+  },
+  lockUntil: {
+    type: Date,
+    default: null,
   },
   createdAt: {
     type: Date,

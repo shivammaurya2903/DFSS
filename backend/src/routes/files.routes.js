@@ -4,8 +4,10 @@ const multer = require('multer');
 const path = require('path');
 const os = require('os');
 const authenticateToken = require('../middleware/authenticateToken');
+const config = require('../config');
 const {
   getFiles,
+  getUploadLimits,
   getShared,
   getFavorites,
   toggleFavorite,
@@ -31,7 +33,7 @@ const upload = multer({
     filename: (req, file, cb) => cb(null, `upload_${Date.now()}_${Math.random().toString(36).slice(2)}`),
   }),
   limits: {
-    fileSize: 10 * 1024 * 1024 * 1024, // 10 GB
+    fileSize: config.maxOriginalFileSize,
   },
 });
 
@@ -44,6 +46,7 @@ router.use(authenticateToken);
 
 // File CRUD
 router.get('/', getFiles);
+router.get('/limits', getUploadLimits);
 router.post('/upload', upload.single('file'), uploadFile);
 router.get('/shared', getShared);
 router.get('/favorites', getFavorites);

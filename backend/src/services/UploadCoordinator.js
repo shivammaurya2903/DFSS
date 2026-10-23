@@ -9,6 +9,17 @@ const StorageService = require('./StorageService');
 const PlacementPolicyManager = require('../placement/PlacementPolicyManager');
 const config = require('../config');
 const { isPotentiallyCompressible, compressFile } = require('../utils/compression');
+const { buildEncryptionInfo, encryptChunk, sha256 } = require('../utils/encryption');
+
+function hashFile(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', (data) => hash.update(data));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(hash.digest('hex')));
+  });
+}
 
 /**
  * UploadCoordinator
@@ -26,13 +37,11 @@ const UploadCoordinator = {
       scenarioId = null,
     } = opts;
 
-    console.log('[DEBUG] UploadCoordinator.upload opts:', { userId, originalname: fileData?.originalname });
-
     const timings = {};
     const globalStart = Date.now();
 
     const validationStart = Date.now();
-    if (!fileData) throw Object.assign(new Error('No file provided'), { code: 'INVALID_FILE' });
+    if (!fileData) throw Object.assign(new Error('No file provided'), { code: 'INVALID_FILE', statusCode: 400 });
     timings.validationTime = Date.now() - validationStart;
 
     const uploadId = crypto.randomUUID();
@@ -41,8 +50,7 @@ const UploadCoordinator = {
     // COMPUTE ORIGINAL FILE SHA-256 (pre-encryption)
     // ─────────────────────────────────────────
     const checksumStart = Date.now();
-    const originalFileBuffer = fs.readFileSync(fileData.path);
-    const originalChecksum = crypto.createHash('sha256').update(originalFileBuffer).digest('hex');
+    const originalChecksum = await hashFile(fileData.path);
     const originalSize = fileData.size;
     timings.checksumTime = Date.now() - checksumStart;
 
@@ -52,16 +60,16 @@ const UploadCoordinator = {
     const maxOriginalSize = config.maxOriginalFileSize || 500 * 1024 * 1024; // 500 MB default
     if (originalSize > maxOriginalSize) {
       try { fs.unlinkSync(fileData.path); } catch (_) {}
-      throw Object.assign(new Error(`File exceeds maximum allowed original size of ${maxOriginalSize / (1024*1024)} MB.`), { code: 'ORIGINAL_FILE_LIMIT_EXCEEDED' });
+      throw Object.assign(new Error(`File exceeds maximum allowed original size of ${maxOriginalSize / (1024*1024)} MB.`), { code: 'ORIGINAL_FILE_LIMIT_EXCEEDED', statusCode: 413 });
     }
 
     // ─────────────────────────────────────────
     // COMPRESSION
     // ─────────────────────────────────────────
-    let finalFileBuffer = originalFileBuffer;
     let storedSize = originalSize;
     let compressionApplied = false;
     let tempCompressedPath = null;
+    let uploadPath = fileData.path;
     const compressionStart = Date.now();
 
     if (isPotentiallyCompressible(fileData.mimetype, fileData.originalname)) {
@@ -72,7 +80,7 @@ const UploadCoordinator = {
       if (compressedSize < originalSize) {
         compressionApplied = true;
         storedSize = compressedSize;
-        finalFileBuffer = fs.readFileSync(tempCompressedPath);
+        uploadPath = tempCompressedPath;
       }
     }
     timings.compressionTime = Date.now() - compressionStart;
@@ -80,27 +88,34 @@ const UploadCoordinator = {
     // ─────────────────────────────────────────
     // POST-COMPRESSION VALIDATION
     // ─────────────────────────────────────────
-    if (storedSize > 10 * 1024 * 1024) {
+    const maxStoredSize = config.maxStoredFileSize || maxOriginalSize;
+    if (storedSize > maxStoredSize) {
       if (tempCompressedPath) try { fs.unlinkSync(tempCompressedPath); } catch (_) {}
       try { fs.unlinkSync(fileData.path); } catch (_) {}
-      throw Object.assign(new Error('This file could not be reduced below the 10 MB storage limit.'), { code: 'STORED_FILE_LIMIT_EXCEEDED' });
+      throw Object.assign(new Error(`File exceeds the ${maxStoredSize / (1024*1024)} MB stored-size limit.`), { code: 'STORED_FILE_LIMIT_EXCEEDED', statusCode: 413 });
     }
 
     // ─────────────────────────────────────────
     // QUOTA RESERVATION
     // ─────────────────────────────────────────
     const user = await User.findOneAndUpdate(
-      { _id: userId, $expr: { $lte: [ { $add: [{ $ifNull: ["$usedStorage", 0] }, { $ifNull: ["$reservedStorage", 0] }, storedSize] }, { $ifNull: ["$storageQuota", 104857600] } ] } },
+      { _id: userId, $expr: { $lte: [ { $add: [{ $ifNull: ["$usedStorage", 0] }, { $ifNull: ["$reservedStorage", 0] }, storedSize] }, { $ifNull: ["$storageQuota", config.defaultStorageQuota] } ] } },
       { $inc: { reservedStorage: storedSize } },
       { returnDocument: 'after' }
     );
     if (!user) {
       if (tempCompressedPath) try { fs.unlinkSync(tempCompressedPath); } catch (_) {}
       try { fs.unlinkSync(fileData.path); } catch (_) {}
-      throw Object.assign(new Error('Not enough storage quota.'), { code: 'USER_STORAGE_QUOTA_EXCEEDED' });
+      throw Object.assign(new Error('Not enough storage quota.'), { code: 'USER_STORAGE_QUOTA_EXCEEDED', statusCode: 507 });
     }
 
     let fileDoc;
+    let chunkDocs = [];
+    let totalPlacementTimeMs = 0;
+    let totalPrimaryWriteMs = 0;
+    let totalReplicaWriteMs = 0;
+    let physicalChunksWritten = [];
+    let encryptionTimes = [];
     try {
       // ─────────────────────────────────────────
       // CREATE FILE RECORD (status: PROCESSING)
@@ -133,8 +148,9 @@ const UploadCoordinator = {
       // ─────────────────────────────────────────
       const chunkingStart = Date.now();
       const chunkSize = config.chunkSizeBytes;
-      const totalChunks = Math.ceil(finalFileBuffer.length / chunkSize);
-      const encryptionKey = Buffer.from(config.encryptionKey.padEnd(32, '0').slice(0, 32));
+      const totalChunks = Math.ceil(storedSize / chunkSize);
+      const { dataKey: encryptionKey, encryptionInfo } = buildEncryptionInfo();
+      await File.findByIdAndUpdate(fileDoc._id, { encryptionInfo });
 
       await File.findByIdAndUpdate(fileDoc._id, {
         chunkCount: totalChunks,
@@ -142,68 +158,73 @@ const UploadCoordinator = {
       });
       timings.chunkingSetupTime = Date.now() - chunkingStart;
 
-      const chunkDocs = [];
-      let totalPlacementTimeMs = 0;
-      let totalPrimaryWriteMs = 0;
-      let totalReplicaWriteMs = 0;
-      const physicalChunksWritten = [];
-      const encryptionTimes = [];
+      const sourceFd = fs.openSync(uploadPath, 'r');
+      try {
+        for (let i = 0; i < totalChunks; i++) {
+          const offset = i * chunkSize;
+          const length = Math.min(chunkSize, storedSize - offset);
+          const rawChunk = Buffer.allocUnsafe(length);
+          const bytesRead = fs.readSync(sourceFd, rawChunk, 0, length, offset);
+          if (bytesRead !== length) {
+            throw Object.assign(new Error(`Short read while chunking upload (${bytesRead}/${length})`), {
+              code: 'UPLOAD_READ_FAILED',
+              statusCode: 500,
+            });
+          }
 
-      for (let i = 0; i < totalChunks; i++) {
-        const rawChunk = finalFileBuffer.slice(i * chunkSize, (i + 1) * chunkSize);
+          const chunkChecksum = sha256(rawChunk);
 
-        const chunkChecksum = crypto.createHash('sha256').update(rawChunk).digest('hex');
+          const encStart = Date.now();
+          const encryptedChunk = encryptChunk(rawChunk, encryptionKey);
+          const encryptedChecksum = sha256(encryptedChunk);
+          encryptionTimes.push(Date.now() - encStart);
 
-        const encStart = Date.now();
-        const iv = crypto.randomBytes(16);
-        const cipher = crypto.createCipheriv('aes-256-cbc', encryptionKey, iv);
-        const encryptedChunk = Buffer.concat([iv, cipher.update(rawChunk), cipher.final()]);
-        const encryptedChecksum = crypto.createHash('sha256').update(encryptedChunk).digest('hex');
-        encryptionTimes.push(Date.now() - encStart);
+          const chunkId = `${fileDoc._id}_${i}`;
 
-        const chunkId = `${fileDoc._id}_${i}`;
+          const placementStart = Date.now();
+          const placement = await PlacementPolicyManager.place({
+            file: fileDoc,
+            chunkId,
+            chunkSize: rawChunk.length,
+            replicationFactor: config.replicationFactor,
+            runId,
+            scenarioId,
+          });
+          totalPlacementTimeMs += Date.now() - placementStart;
 
-        const placementStart = Date.now();
-        const placement = await PlacementPolicyManager.place({
-          file: fileDoc,
-          chunkId,
-          chunkSize: rawChunk.length,
-          replicationFactor: config.replicationFactor,
-          runId,
-          scenarioId,
-        });
-        totalPlacementTimeMs += Date.now() - placementStart;
+          const primaryNode = placement.primary;
+          const replicaNodes = placement.replicas;
 
-        const primaryNode = placement.primary;
-        const replicaNodes = placement.replicas;
+          const primaryUrl = primaryNode.url || await StorageService.getNodeUrlFromDB(primaryNode.nodeId) || StorageService.getNodeUrl(primaryNode.nodeId);
+          const pWriteStart = Date.now();
+          await StorageService.writeChunk(primaryUrl, chunkId, encryptedChunk, encryptedChecksum);
+          physicalChunksWritten.push({ url: primaryUrl, chunkId });
+          totalPrimaryWriteMs += Date.now() - pWriteStart;
 
-        const primaryUrl = primaryNode.url || await StorageService.getNodeUrlFromDB(primaryNode.nodeId) || StorageService.getNodeUrl(primaryNode.nodeId);
-        const pWriteStart = Date.now();
-        await StorageService.writeChunk(primaryUrl, chunkId, encryptedChunk, encryptedChecksum);
-        physicalChunksWritten.push({ url: primaryUrl, chunkId });
-        totalPrimaryWriteMs += Date.now() - pWriteStart;
+          const rWriteStart = Date.now();
+          await File.findByIdAndUpdate(fileDoc._id, { status: 'REPLICATING' });
+          for (const replicaNode of replicaNodes) {
+            const replicaUrl = replicaNode.url || await StorageService.getNodeUrlFromDB(replicaNode.nodeId) || StorageService.getNodeUrl(replicaNode.nodeId);
+            await StorageService.writeChunk(replicaUrl, chunkId, encryptedChunk, encryptedChecksum);
+            physicalChunksWritten.push({ url: replicaUrl, chunkId });
+          }
+          totalReplicaWriteMs += Date.now() - rWriteStart;
 
-        const rWriteStart = Date.now();
-        await File.findByIdAndUpdate(fileDoc._id, { status: 'REPLICATING' });
-        for (const replicaNode of replicaNodes) {
-          const replicaUrl = replicaNode.url || await StorageService.getNodeUrlFromDB(replicaNode.nodeId) || StorageService.getNodeUrl(replicaNode.nodeId);
-          await StorageService.writeChunk(replicaUrl, chunkId, encryptedChunk, encryptedChecksum);
-          physicalChunksWritten.push({ url: replicaUrl, chunkId });
+          const chunkDoc = await Chunk.create({
+            chunkId,
+            fileId: fileDoc._id,
+            sequence: i,
+            size: rawChunk.length,
+            checksum: chunkChecksum,
+            primaryNode: primaryNode.nodeId,
+            replicaNodes: replicaNodes.map(n => n.nodeId),
+            status: 'VERIFIED',
+          });
+
+          chunkDocs.push(chunkDoc._id);
         }
-        totalReplicaWriteMs += Date.now() - rWriteStart;
-
-        const chunkDoc = await Chunk.create({
-          chunkId,
-          fileId: fileDoc._id,
-          sequence: i,
-          size: rawChunk.length,
-          checksum: chunkChecksum,
-          primaryNode: primaryNode.nodeId,
-          replicaNodes: replicaNodes.map(n => n.nodeId),
-          status: 'VERIFIED',
-        });
-
-        chunkDocs.push(chunkDoc._id);
+      } finally {
+        fs.closeSync(sourceFd);
       }
 
       timings.encryptionTime = encryptionTimes.reduce((a, b) => a + b, 0);
@@ -241,6 +262,8 @@ const UploadCoordinator = {
         action: 'UPLOAD',
         status: 'SUCCESS',
         fileId: finalFile._id,
+        runId,
+        scenarioId,
         latencyMs: timings.totalUploadTime,
         metadata: {
           originalName: fileData.originalname,
@@ -262,7 +285,7 @@ const UploadCoordinator = {
       await User.findByIdAndUpdate(userId, { $inc: { reservedStorage: -storedSize } });
 
       // Clean up orphaned physical chunks
-      if (typeof physicalChunksWritten !== 'undefined' && physicalChunksWritten.length > 0) {
+      if (physicalChunksWritten.length > 0) {
         for (const { url, chunkId } of physicalChunksWritten) {
           try {
             await StorageService.deleteChunk(url, chunkId);
@@ -281,6 +304,8 @@ const UploadCoordinator = {
         action: 'UPLOAD',
         status: 'FAILURE',
         fileId: fileDoc ? fileDoc._id : null,
+        runId,
+        scenarioId,
         reason: err.message,
         metadata: { originalName: fileData.originalname },
       });

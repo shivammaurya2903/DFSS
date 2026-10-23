@@ -48,8 +48,14 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {}
   };
 
+  const updateUser = async (payload) => {
+    const data = await authService.updateMe(payload);
+    setUser(data.user);
+    return data;
+  };
+
   return (
-    <AuthContext.Provider value={{ user, login, register, logout, loading, refreshUser }}>
+    <AuthContext.Provider value={{ user, login, register, logout, loading, refreshUser, updateUser }}>
       {!loading && children}
     </AuthContext.Provider>
   );

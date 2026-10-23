@@ -7,10 +7,13 @@ import { useToast } from '../context/ToastContext';
 import { formatBytes } from '../utils/formatters';
 
 const Settings = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const { addToast } = useToast();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('security');
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [savingPassword, setSavingPassword] = useState(false);
 
   const tabs = [
     { id: 'security', label: 'Security', icon: Shield },
@@ -19,12 +22,30 @@ const Settings = () => {
     { id: 'about', label: 'About', icon: Info }
   ];
 
-  const handleUpdatePassword = () => {
-    addToast('Password update functionality is coming soon.', 'info');
+  const handleUpdatePassword = async (e) => {
+    e.preventDefault();
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      addToast('New passwords do not match.', 'error');
+      return;
+    }
+    try {
+      setSavingPassword(true);
+      await updateUser({
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword,
+      });
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      setShowPasswordForm(false);
+      addToast('Password updated successfully.', 'success');
+    } catch (err) {
+      addToast(err.response?.data?.message || 'Failed to update password.', 'error');
+    } finally {
+      setSavingPassword(false);
+    }
   };
 
   const used = user?.usedStorage || 0;
-  const quota = user?.storageQuota || (100 * 1024 * 1024);
+  const quota = user?.storageQuota || (1024 * 1024 * 1024);
 
   return (
     <PageContainer>
@@ -68,10 +89,32 @@ const Settings = () => {
                     <h3 className="font-semibold text-[#17181C]">Change Password</h3>
                     <p className="text-sm text-[#6F737D] mt-1 max-w-md">Ensure your account is using a long, random password to stay secure.</p>
                   </div>
-                  <button onClick={handleUpdatePassword} className="px-5 py-2.5 bg-white border border-[#E7E9EF] rounded-xl text-sm font-medium text-[#17181C] hover:bg-[#F5F7FB] transition-colors self-start md:self-auto flex items-center gap-2">
-                    <Lock className="w-4 h-4" /> Update
+                  <button onClick={() => setShowPasswordForm(!showPasswordForm)} className="px-5 py-2.5 bg-white border border-[#E7E9EF] rounded-xl text-sm font-medium text-[#17181C] hover:bg-[#F5F7FB] transition-colors self-start md:self-auto flex items-center gap-2">
+                    <Lock className="w-4 h-4" /> {showPasswordForm ? 'Cancel' : 'Update'}
                   </button>
                 </div>
+
+                {showPasswordForm && (
+                  <form onSubmit={handleUpdatePassword} className="space-y-4 pb-6 border-b border-[#F5F7FB]">
+                    <div>
+                      <label className="block text-sm font-medium text-[#17181C] mb-1">Current Password</label>
+                      <input type="password" required value={passwordForm.currentPassword} onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })} className="w-full px-3 py-2.5 border border-[#E7E9EF] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#8178F2]" />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-[#17181C] mb-1">New Password</label>
+                        <input type="password" required minLength={6} value={passwordForm.newPassword} onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })} className="w-full px-3 py-2.5 border border-[#E7E9EF] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#8178F2]" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-[#17181C] mb-1">Confirm New Password</label>
+                        <input type="password" required minLength={6} value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })} className="w-full px-3 py-2.5 border border-[#E7E9EF] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#8178F2]" />
+                      </div>
+                    </div>
+                    <button type="submit" disabled={savingPassword} className="px-5 py-2.5 bg-[#8178F2] text-white rounded-xl text-sm font-medium hover:bg-[#6c63e6] transition-colors disabled:opacity-70">
+                      {savingPassword ? 'Saving...' : 'Save Password'}
+                    </button>
+                  </form>
+                )}
 
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-[#F5F7FB]">
                   <div>

@@ -216,7 +216,6 @@ app.get('/internal/health', (req, res) => {
   res.json({
     nodeId: NODE_ID,
     status: 'healthy',
-    storageDir: CHUNKS_DIR,
     uptime: process.uptime(),
   });
 });
@@ -256,7 +255,6 @@ app.get('/internal/metrics', (req, res) => {
       : 0,
     chunkCount,
     activeRequests,
-    storageDir: CHUNKS_DIR,
     // Physical disclaimer: all nodes share one HDD
     failureDomainId: 'LOCAL-HDD',
     physicalNote: 'PROTOTYPE: all nodes share one physical HDD',

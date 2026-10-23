@@ -328,9 +328,9 @@ const Storage = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {nodes.map(node => (
           <div 
-            key={node.id || node._id} 
+            key={node.nodeId || node._id} 
             className="bg-white p-5 rounded-xl border border-gray-100 hover:shadow-md transition-shadow cursor-pointer shadow-sm"
-            onClick={() => navigate(`/storage/nodes/${node.id || node._id}`)}
+            onClick={() => navigate(`/storage/nodes/${node.nodeId || node._id}`)}
           >
             <div className="flex justify-between items-start mb-4">
               <div className="flex items-center gap-3">

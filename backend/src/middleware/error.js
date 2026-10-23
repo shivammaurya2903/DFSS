@@ -1,9 +1,15 @@
 function errorHandler(err, req, res, next) {
-  const statusCode = err.statusCode || (err.code === 'INSUFFICIENT_ELIGIBLE_NODES' ? 503 : 500);
-  const message = err.message || "Internal Server Error";
+  const isMulterLimit = err.code === 'LIMIT_FILE_SIZE';
+  const statusCode = err.statusCode
+    || (isMulterLimit ? 413 : null)
+    || (err.code === 'INSUFFICIENT_ELIGIBLE_NODES' ? 503 : 500);
+  const code = isMulterLimit ? 'FILE_TOO_LARGE' : (err.code || 'SERVER_ERROR');
+  const message = isMulterLimit
+    ? `File exceeds the ${Math.floor(require('../config').maxOriginalFileSize / (1024 * 1024))} MB upload limit.`
+    : (err.message || "Internal Server Error");
 
   const response = {
-    error: err.code || "SERVER_ERROR",
+    error: code,
     success: false,
     message,
     ...(err.requiredNodes && { requiredNodes: err.requiredNodes }),

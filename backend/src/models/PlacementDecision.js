@@ -37,7 +37,7 @@ const placementDecisionSchema = new mongoose.Schema({
   },
   strategy: {
     type: String,
-    enum: ['ROUND_ROBIN', 'PERFORMANCE_AWARE', 'ADAPTIVE'],
+    enum: ['ROUND_ROBIN', 'PERFORMANCE_AWARE', 'PERFORMANCE_SECURITY', 'ADAPTIVE'],
     required: true,
     index: true,
   },

@@ -16,7 +16,7 @@ const TEST_PASSWORD = 'TestPass123!';
 
 // Create a 15 MB test file (larger than 1 chunk of 10 MB → 2 chunks)
 const TEST_FILE_PATH = path.join(os.tmpdir(), `dfss_test_${Date.now()}.bin`);
-const TEST_FILE_SIZE = 5 * 1024 * 1024; // 15 MB
+const TEST_FILE_SIZE = 15 * 1024 * 1024; // 15 MB -> 2 chunks at the default 10 MB chunk size
 
 async function run() {
   console.log('=== DFSS End-to-End Smoke Test ===\n');

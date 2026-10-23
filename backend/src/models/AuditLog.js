@@ -26,7 +26,7 @@ const auditLogSchema = new mongoose.Schema({
     type: String,
     enum: [
       'LOGIN', 'LOGOUT', 'REGISTER',
-      'UPLOAD', 'DOWNLOAD', 'DELETE',
+      'UPLOAD', 'DOWNLOAD', 'DELETE', 'FILE_DELETED',
       'SHARE', 'REVOKE_SHARE',
       'PLACEMENT', 'REPLICA_CREATE',
       'NODE_FAILURE', 'NODE_RECOVERY',
@@ -34,6 +34,7 @@ const auditLogSchema = new mongoose.Schema({
       'RE_EVALUATION',
       'ADMIN_ACTION',
       'EXPERIMENT_START', 'EXPERIMENT_END',
+      'CONDITION_INJECTED', 'CONDITION_CLEARED',
     ],
     required: true,
     index: true,
@@ -59,6 +60,15 @@ const auditLogSchema = new mongoose.Schema({
     index: true,
   },
   strategy: {
+    type: String,
+    default: null,
+  },
+  runId: {
+    type: String,
+    default: null,
+    index: true,
+  },
+  scenarioId: {
     type: String,
     default: null,
   },

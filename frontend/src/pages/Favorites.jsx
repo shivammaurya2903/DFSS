@@ -144,7 +144,7 @@ const Favorites = () => {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
-                    {formatSize(file.storedSize || file.size)}
+                    {formatSize(file.originalSize || file.size)}
                   </td>
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{new Date(file.updatedAt || file.createdAt).toLocaleDateString()}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-right">

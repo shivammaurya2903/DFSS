@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const crypto = require('crypto');
+const config = require('../config');
 
 /**
  * ShareToken Model
@@ -34,7 +35,7 @@ const shareTokenSchema = new mongoose.Schema({
   },
   expiresAt: {
     type: Date,
-    required: true,
+    default: null,
     index: true,
   },
   revokedAt: {
@@ -67,11 +68,34 @@ shareTokenSchema.statics.hashToken = function (token) {
 };
 
 /**
+ * Derive a stable, unguessable share token from the share document ID.
+ * Only the hash is persisted, so the database alone cannot recover links.
+ * Rotating SHARE_TOKEN_SECRET invalidates every existing link.
+ */
+shareTokenSchema.statics.deriveToken = function (shareId) {
+  return crypto
+    .createHmac('sha256', config.shareTokenSecret)
+    .update(String(shareId))
+    .digest('base64url');
+};
+
+/**
+ * Return the plaintext token for a stored share only when this deployment
+ * generated it using the current secret. Legacy random-token shares cannot
+ * be recovered and return null.
+ */
+shareTokenSchema.statics.getTokenForShare = function (share) {
+  if (!share || !share._id) return null;
+  const token = this.deriveToken(share._id);
+  return this.hashToken(token) === share.tokenHash ? token : null;
+};
+
+/**
  * Check if this share token is currently valid.
  */
 shareTokenSchema.methods.isValid = function () {
   if (this.revokedAt) return false;
-  if (new Date() > this.expiresAt) return false;
+  if (this.expiresAt && new Date() > this.expiresAt) return false;
   return true;
 };
 

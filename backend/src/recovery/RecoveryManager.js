@@ -3,24 +3,17 @@ const File = require('../models/File');
 const StorageNode = require('../models/StorageNode');
 const AuditLog = require('../models/AuditLog');
 const StorageService = require('../services/StorageService');
-const PlacementPolicyManager = require('../placement/PlacementPolicyManager');
-const config = require('../config');
+const { getFileKey, decryptChunk, sha256 } = require('../utils/encryption');
 
 /**
  * RecoveryManager
  *
  * Handles failure recovery when a storage node goes OFFLINE.
  *
- * Recovery pipeline:
- *   1. Find all chunks that had the failed node as primary or replica
- *   2. For primary failures: verify replica exists + serves requests
- *   3. Select a healthy replacement node using the placement strategy
- *   4. Copy chunk data from replica → replacement node
- *   5. Verify checksum on replacement node
- *   6. Update metadata: new primary or add new replica
- *   7. File status: DEGRADED → RECOVERING → READY
- *
- * Records recovery metrics for research analysis.
+ * Checksum contract:
+ *   - Chunk.checksum is the SHA-256 of the plaintext (compressed file) chunk.
+ *   - Storage nodes verify the SHA-256 of the bytes they receive, which are
+ *     encrypted. The write call must therefore use the encrypted payload hash.
  */
 const RecoveryManager = {
   /**
@@ -33,7 +26,6 @@ const RecoveryManager = {
     const recoveryStart = Date.now();
     console.log(`[RecoveryManager] Starting recovery for failed node: ${failedNodeId}`);
 
-    // Find all chunks affected by this failure
     const affectedChunks = await Chunk.find({
       $or: [
         { primaryNode: failedNodeId },
@@ -44,27 +36,31 @@ const RecoveryManager = {
 
     if (affectedChunks.length === 0) {
       console.log(`[RecoveryManager] No affected chunks for node ${failedNodeId}`);
-      return;
+      return { affectedChunks: 0, recoveredCount: 0, degradedCount: 0, failedCount: 0 };
     }
 
     console.log(`[RecoveryManager] ${affectedChunks.length} chunk(s) affected by ${failedNodeId}`);
 
-    // Mark affected files as DEGRADED
     const affectedFileIds = [...new Set(affectedChunks.map(c => c.fileId.toString()))];
     await File.updateMany(
-      { _id: { $in: affectedFileIds }, status: 'READY' },
-      { status: 'DEGRADED' }
+      { _id: { $in: affectedFileIds }, status: { $in: ['READY', 'DEGRADED'] } },
+      { status: 'RECOVERING' }
     );
 
     let recoveredCount = 0;
+    let degradedCount = 0;
     let failedCount = 0;
     let totalBytesRecovered = 0;
 
     for (const chunk of affectedChunks) {
       try {
-        await this._recoverChunk(chunk, failedNodeId);
-        recoveredCount++;
-        totalBytesRecovered += chunk.size || 0;
+        const result = await this._recoverChunk(chunk, failedNodeId);
+        if (result.replaced) {
+          recoveredCount++;
+          totalBytesRecovered += chunk.size || 0;
+        } else {
+          degradedCount++;
+        }
       } catch (err) {
         failedCount++;
         console.error(
@@ -74,115 +70,147 @@ const RecoveryManager = {
       }
     }
 
-    // Mark files READY if all their chunks are recovered
     for (const fileId of affectedFileIds) {
-      const degradedChunks = await Chunk.countDocuments({ fileId, status: 'FAILED' });
-      if (degradedChunks === 0) {
-        await File.findByIdAndUpdate(fileId, { status: 'READY' });
-      }
+      const unverifiedChunks = await Chunk.countDocuments({
+        fileId,
+        status: { $ne: 'VERIFIED' },
+      });
+      await File.findByIdAndUpdate(fileId, {
+        status: unverifiedChunks === 0 ? 'READY' : 'DEGRADED',
+      });
     }
 
     const recoveryTimeMs = Date.now() - recoveryStart;
 
     await AuditLog.create({
       action: 'NODE_RECOVERY',
-      status: failedCount === 0 ? 'SUCCESS' : 'FAILURE',
+      status: failedCount === 0 && degradedCount === 0 ? 'SUCCESS' : 'FAILURE',
       nodeId: failedNodeId,
       latencyMs: recoveryTimeMs,
       metadata: {
         affectedChunks: affectedChunks.length,
         recoveredCount,
+        degradedCount,
         failedCount,
         totalBytesRecovered,
         recoveryTimeMs,
+        simulated: false,
       },
     }).catch(() => {});
 
     console.log(
       `[RecoveryManager] Recovery complete for ${failedNodeId}: ` +
-      `${recoveredCount} recovered, ${failedCount} failed. Time: ${recoveryTimeMs}ms`
+      `${recoveredCount} recovered, ${degradedCount} degraded, ${failedCount} failed. ` +
+      `Time: ${recoveryTimeMs}ms`
     );
+
+    return {
+      affectedChunks: affectedChunks.length,
+      recoveredCount,
+      degradedCount,
+      failedCount,
+      recoveryTimeMs,
+    };
   },
 
   /**
    * Recover a single chunk after its node failed.
+   * @returns {Promise<{replaced: boolean}>}
    */
   async _recoverChunk(chunk, failedNodeId) {
-    // Find the best source: a healthy node that has this chunk
     const sourceNodeId = await this._findHealthySource(chunk, failedNodeId);
     if (!sourceNodeId) {
       throw new Error(`No healthy source for chunk ${chunk.chunkId}`);
     }
 
-    const sourceNode = await StorageNode.findOne({ nodeId: sourceNodeId });
-    const sourceUrl = sourceNode?.url || StorageService.getNodeUrl(sourceNodeId);
-
-    // Read chunk data from source
-    const chunkData = await StorageService.readChunk(sourceUrl, chunk.chunkId);
-
-    // Verify checksum
-    const crypto = require('crypto');
-    const encKey = Buffer.from(config.encryptionKey.padEnd(32, '0').slice(0, 32));
-    const iv = chunkData.slice(0, 16);
-    const ciphertext = chunkData.slice(16);
-    const decipher = crypto.createDecipheriv('aes-256-cbc', encKey, iv);
-    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    const actualChecksum = crypto.createHash('sha256').update(decrypted).digest('hex');
-
-    if (actualChecksum !== chunk.checksum) {
-      throw new Error(`Source chunk ${chunk.chunkId} checksum mismatch — source data is corrupt`);
+    const file = await File.findById(chunk.fileId);
+    if (!file) {
+      throw new Error(`File metadata not found for chunk ${chunk.chunkId}`);
     }
 
-    // Find a replacement node (different from failed + current nodes)
+    const sourceNode = await StorageNode.findOne({ nodeId: sourceNodeId });
+    const sourceUrl = sourceNode?.url
+      || await StorageService.getNodeUrlFromDB(sourceNodeId)
+      || StorageService.getNodeUrl(sourceNodeId);
+    if (!sourceUrl) {
+      throw new Error(`No URL configured for source node ${sourceNodeId}`);
+    }
+
+    const chunkData = await StorageService.readChunk(sourceUrl, chunk.chunkId);
+
+    // Verify the plaintext checksum with the same key used at upload time.
+    const decrypted = decryptChunk(chunkData, getFileKey(file));
+    const actualChecksum = sha256(decrypted);
+    if (actualChecksum !== chunk.checksum) {
+      throw new Error(
+        `Source chunk ${chunk.chunkId} checksum mismatch - source data is corrupt`
+      );
+    }
+
     const excludeNodeIds = [
       failedNodeId,
       chunk.primaryNode,
-      ...chunk.replicaNodes,
-    ].filter(id => id !== failedNodeId);
+      ...(chunk.replicaNodes || []),
+    ].filter((id, index, all) => id && all.indexOf(id) === index);
 
     const replacementNode = await this._selectReplacementNode(
-      chunk, excludeNodeIds, chunkData.length
+      chunk,
+      excludeNodeIds,
+      chunkData.length
     );
 
     if (!replacementNode) {
-      console.warn(`[RecoveryManager] No replacement node available for chunk ${chunk.chunkId}, leaving degraded.`);
+      console.warn(
+        `[RecoveryManager] No replacement node available for chunk ${chunk.chunkId}; ` +
+        'leaving chunk degraded.'
+      );
       const updateFields = { status: 'DEGRADED' };
       if (chunk.primaryNode === failedNodeId) {
-        const newPrimary = chunk.replicaNodes.find(id => id !== failedNodeId);
+        const newPrimary = (chunk.replicaNodes || []).find(id => id !== failedNodeId);
         if (newPrimary) {
           updateFields.primaryNode = newPrimary;
-          updateFields.replicaNodes = chunk.replicaNodes.filter(id => id !== failedNodeId && id !== newPrimary);
+          updateFields.replicaNodes = (chunk.replicaNodes || [])
+            .filter(id => id !== failedNodeId && id !== newPrimary);
         } else {
-          throw new Error(`No primary candidate available`);
+          throw new Error('No primary candidate available');
         }
       } else {
-        updateFields.replicaNodes = chunk.replicaNodes.filter(id => id !== failedNodeId);
+        updateFields.replicaNodes = (chunk.replicaNodes || [])
+          .filter(id => id !== failedNodeId);
       }
       await Chunk.findByIdAndUpdate(chunk._id, updateFields);
-      return;
+      return { replaced: false };
     }
 
-    const replacementUrl = replacementNode.url || StorageService.getNodeUrl(replacementNode.nodeId);
+    const replacementUrl = replacementNode.url
+      || await StorageService.getNodeUrlFromDB(replacementNode.nodeId)
+      || StorageService.getNodeUrl(replacementNode.nodeId);
 
-    // Write to replacement node
-    await StorageService.writeChunk(replacementUrl, chunk.chunkId, chunkData, chunk.checksum);
+    // The node stores encrypted bytes, so it must receive the hash of those
+    // bytes. chunk.checksum remains the plaintext integrity value in metadata.
+    await StorageService.writeChunk(
+      replacementUrl,
+      chunk.chunkId,
+      chunkData,
+      sha256(chunkData)
+    );
 
-    // Update metadata
     const updateFields = {};
     if (chunk.primaryNode === failedNodeId) {
-      // Promote first available replica as new primary, add replacement as new replica
-      const newPrimary = chunk.replicaNodes.find(id => id !== failedNodeId) || replacementNode.nodeId;
+      const newPrimary = (chunk.replicaNodes || []).find(id => id !== failedNodeId)
+        || replacementNode.nodeId;
       updateFields.primaryNode = newPrimary;
       updateFields.replicaNodes = [
-        ...chunk.replicaNodes.filter(id => id !== failedNodeId && id !== newPrimary),
+        ...(chunk.replicaNodes || []).filter(
+          id => id !== failedNodeId && id !== newPrimary
+        ),
         replacementNode.nodeId,
-      ].filter(id => id !== newPrimary);
+      ].filter((id, index, all) => id !== newPrimary && all.indexOf(id) === index);
     } else {
-      // Failed node was a replica — replace it
       updateFields.replicaNodes = [
-        ...chunk.replicaNodes.filter(id => id !== failedNodeId),
+        ...(chunk.replicaNodes || []).filter(id => id !== failedNodeId),
         replacementNode.nodeId,
-      ];
+      ].filter((id, index, all) => id !== failedNodeId && all.indexOf(id) === index);
     }
     updateFields.status = 'VERIFIED';
 
@@ -194,7 +222,13 @@ const RecoveryManager = {
       chunkId: chunk.chunkId,
       nodeId: replacementNode.nodeId,
       reason: `Replaced failed node ${failedNodeId}`,
+      metadata: {
+        sourceNodeId,
+        encryptedBytes: chunkData.length,
+      },
     }).catch(() => {});
+
+    return { replaced: true };
   },
 
   /**
@@ -203,7 +237,7 @@ const RecoveryManager = {
   async _findHealthySource(chunk, excludeNodeId) {
     const candidates = [
       chunk.primaryNode !== excludeNodeId ? chunk.primaryNode : null,
-      ...chunk.replicaNodes.filter(id => id !== excludeNodeId),
+      ...(chunk.replicaNodes || []).filter(id => id !== excludeNodeId),
     ].filter(Boolean);
 
     for (const nodeId of candidates) {

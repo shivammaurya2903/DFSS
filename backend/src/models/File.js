@@ -77,6 +77,12 @@ const fileSchema = new mongoose.Schema({
   },
   encryptionInfo: {
     algorithm: { type: String, default: 'AES-256-CBC' },
+    // Envelope encryption (v2): a random per-file data key is wrapped by the
+    // master key. Files without keyVersion=2 are legacy single-key files.
+    keyVersion: { type: Number, default: 1 },
+    wrappedKey: { type: String },
+    wrapIv: { type: String },
+    wrapTag: { type: String },
     keyId: { type: String }, // identifier for key used; never store the actual key
   },
   chunkCount: {
@@ -101,7 +107,7 @@ const fileSchema = new mongoose.Schema({
   },
   placementPolicy: {
     type: String,
-    enum: ['ROUND_ROBIN', 'PERFORMANCE_AWARE', 'ADAPTIVE'],
+    enum: ['ROUND_ROBIN', 'PERFORMANCE_AWARE', 'PERFORMANCE_SECURITY', 'ADAPTIVE'],
     default: 'ADAPTIVE',
   },
 

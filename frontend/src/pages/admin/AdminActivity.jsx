@@ -6,30 +6,42 @@ import { useToast } from '../../context/ToastContext';
 const AdminActivity = () => {
   const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [filterAction, setFilterAction] = useState('ALL');
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState(null);
   const { addToast } = useToast();
 
+  const fetchActivities = async () => {
+    setLoading(true);
+    setError(false);
+    try {
+      const data = await activityService.getAdminActivity({
+        page,
+        limit: 50,
+        action: filterAction === 'ALL' ? undefined : filterAction,
+      });
+      setActivities(data?.data || data?.activities || []);
+      setPagination(data?.pagination || null);
+    } catch (err) {
+      console.error('Failed to load admin activity logs:', err);
+      setError(true);
+      addToast("Failed to load admin activity logs.", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchActivities = async () => {
-      setLoading(true);
-      try {
-        const data = await activityService.getAdminActivity({ limit: 100 });
-        setActivities(data?.data || data?.activities || []);
-      } catch (err) {
-        addToast("Failed to load admin activity logs.", "error");
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchActivities();
-  }, [addToast]);
+  }, [addToast, page, filterAction]);
 
-  const filteredActivities = activities.filter(act => {
-    if (filterAction === 'ALL') return true;
-    return act.action === filterAction;
-  });
-
-  const actions = ['ALL', ...new Set(activities.map(a => a.action))];
+  const filteredActivities = activities;
+  const actions = [
+    'ALL', 'UPLOAD', 'DOWNLOAD', 'FILE_DELETED', 'SHARE', 'REVOKE_SHARE',
+    'NODE_FAILURE', 'NODE_RECOVERY', 'REPLICA_REPLACEMENT',
+    'CONDITION_INJECTED', 'CONDITION_CLEARED',
+  ];
 
   return (
     <div className="p-6 max-w-7xl mx-auto flex flex-col h-full">
@@ -46,7 +58,7 @@ const AdminActivity = () => {
             <Filter className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <select 
               value={filterAction}
-              onChange={(e) => setFilterAction(e.target.value)}
+              onChange={(e) => { setFilterAction(e.target.value); setPage(1); }}
               className="pl-9 pr-8 py-2 bg-white border border-gray-200 rounded-lg text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-[#8178F2]/20 focus:border-[#8178F2] transition-all cursor-pointer"
             >
               {actions.map(action => (
@@ -72,6 +84,13 @@ const AdminActivity = () => {
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr><td colSpan="5" className="px-6 py-8 text-center text-gray-500">Loading activity...</td></tr>
+              ) : error ? (
+                <tr>
+                  <td colSpan="5" className="px-6 py-8 text-center text-red-600">
+                    Failed to load activity logs.
+                    <button onClick={fetchActivities} className="ml-2 underline">Retry</button>
+                  </td>
+                </tr>
               ) : filteredActivities.length === 0 ? (
                 <tr><td colSpan="5" className="px-6 py-8 text-center text-gray-500">No activity found.</td></tr>
               ) : (
@@ -88,23 +107,23 @@ const AdminActivity = () => {
                         : (act.userId || 'System')}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">
-                      {act.fileId ? (
-                        <div className="truncate max-w-[200px]" title={act.details?.filename || (typeof act.fileId === 'object' ? act.fileId.originalName : act.fileId)}>
-                          {act.details?.filename || (typeof act.fileId === 'object' ? act.fileId.originalName || act.fileId._id : act.fileId)}
+                      {act.fileId || act.metadata?.filename ? (
+                        <div className="truncate max-w-[200px]" title={act.metadata?.filename || (typeof act.fileId === 'object' ? act.fileId.originalName : act.fileId)}>
+                          {act.metadata?.filename || (typeof act.fileId === 'object' ? act.fileId.originalName || act.fileId._id : act.fileId)}
                         </div>
                       ) : '-'}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-500">
-                      {act.details ? (
-                        <div className="truncate max-w-[250px]" title={JSON.stringify(act.details)}>
-                          {Object.entries(act.details)
+                      {act.metadata && Object.keys(act.metadata).length > 0 ? (
+                        <div className="truncate max-w-[250px]" title={JSON.stringify(act.metadata)}>
+                          {Object.entries(act.metadata)
                             .filter(([k]) => k !== 'filename')
-                            .map(([k, v]) => `${k}: ${v}`).join(', ') || '-'}
+                            .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(', ') || '-'}
                         </div>
                       ) : '-'}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-500 whitespace-nowrap">
-                      {new Date(act.createdAt).toLocaleString()}
+                      {new Date(act.timestamp || act.createdAt || act.date || Date.now()).toLocaleString()}
                     </td>
                   </tr>
                 ))
@@ -113,6 +132,28 @@ const AdminActivity = () => {
           </table>
         </div>
       </div>
+
+      {!loading && !error && pagination && pagination.pages > 1 && (
+        <div className="flex items-center justify-between mt-4 text-sm text-gray-500">
+          <span>Page {pagination.page} of {pagination.pages} ({pagination.total} events)</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage(p => Math.min(pagination.pages, p + 1))}
+              disabled={page >= pagination.pages}
+              className="px-3 py-1.5 bg-white border border-gray-200 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

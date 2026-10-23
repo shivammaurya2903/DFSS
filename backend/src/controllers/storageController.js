@@ -2,6 +2,8 @@ const StorageNode = require('../models/StorageNode');
 const AuditLog = require('../models/AuditLog');
 const User = require('../models/User');
 const File = require('../models/File');
+const PlacementDecision = require('../models/PlacementDecision');
+const PlacementPolicyManager = require('../placement/PlacementPolicyManager');
 const config = require('../config');
 
 // ─────────────────────────────────────────
@@ -180,12 +182,51 @@ const getSystemMetrics = async (req, res, next) => {
 
 const getPlacementDebug = async (req, res, next) => {
   try {
-    const nodes = await StorageNode.find();
+    const [nodes, recentDecisions, totalDecisions] = await Promise.all([
+      StorageNode.find(),
+      PlacementDecision.find().sort({ timestamp: -1 }).limit(20).lean(),
+      PlacementDecision.countDocuments(),
+    ]);
+
+    const latestWithPairs = recentDecisions.find(d => (d.candidatePairs || []).length > 0);
+    const candidateScores = latestWithPairs
+      ? latestWithPairs.candidatePairs.map(pair => ({
+        nodeId: pair.primary,
+        score: pair.score,
+        factors: {
+          load: latestWithPairs.nodeMetricsSnapshot?.[pair.primary]?.currentLoad ?? null,
+          capacity: latestWithPairs.nodeMetricsSnapshot?.[pair.primary]?.freeSpace ?? null,
+          latency: latestWithPairs.nodeMetricsSnapshot?.[pair.primary]?.latency ?? null,
+        },
+      }))
+      : [];
+
     res.json({
       success: true,
       data: {
         totalNodes: nodes.length,
         eligibleCount: nodes.filter(n => n.status === 'HEALTHY').length,
+        activeStrategy: recentDecisions[0]?.strategy || 'ADAPTIVE',
+        strategies: PlacementPolicyManager.getAvailableStrategies(),
+        lastRun: recentDecisions[0]?.timestamp || null,
+        totalDecisions,
+        decisions: recentDecisions.map(decision => ({
+          decisionId: decision.decisionId,
+          fileId: decision.fileId,
+          chunkId: decision.chunkId,
+          chunks: 1,
+          strategy: decision.strategy,
+          nodesChosen: [decision.selectedPrimary, decision.selectedReplica].filter(Boolean),
+          primary: decision.selectedPrimary,
+          replica: decision.selectedReplica,
+          latency: decision.decisionTimeMs,
+          score: decision.score,
+          timestamp: decision.timestamp,
+        })),
+        candidateScores,
+        candidateScoresNote: candidateScores.length
+          ? 'Derived from the latest adaptive placement decision.'
+          : 'No adaptive pair scores recorded yet.',
         nodes: nodes.map(n => ({
           nodeId: n.nodeId,
           status: n.status,
@@ -194,11 +235,12 @@ const getPlacementDebug = async (req, res, next) => {
           failureDomainId: n.failureDomainId,
           securityCapabilities: n.securityCapabilities,
           lastHeartbeat: n.lastHeartbeat,
+          injectedConditions: n.injectedConditions,
         })),
         config: {
-          weights: require('../config').placementWeights,
-          replicationFactor: require('../config').replicationFactor,
-        }
+          weights: config.placementWeights,
+          replicationFactor: config.replicationFactor,
+        },
       }
     });
   } catch (err) {

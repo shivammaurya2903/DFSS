@@ -98,7 +98,7 @@ const Recent = () => {
               </h3>
               
               <div className="mt-auto pt-4 flex items-center justify-between text-xs text-[#6F737D]">
-                <span>{formatBytes(file.storedSize || file.size)}</span>
+                <span>{formatBytes(file.originalSize || file.size)}</span>
                 <span>{formatRelativeTime(file.updatedAt || file.createdAt)}</span>
               </div>
             </div>

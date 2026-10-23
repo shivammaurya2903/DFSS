@@ -50,6 +50,10 @@ export const formatRelativeTime = (dateString) => {
   return rtf.format(-diffInYears, 'year');
 };
 
+export const getOriginalSize = (file) => Number(file?.originalSize ?? file?.size ?? 0);
+
+export const getStoredSize = (file) => Number(file?.storedSize ?? file?.size ?? 0);
+
 export const getFileTypeCategory = (mimeType) => {
   if (!mimeType) return 'other';
   if (mimeType.startsWith('image/')) return 'image';

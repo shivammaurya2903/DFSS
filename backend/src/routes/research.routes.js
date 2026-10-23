@@ -2,63 +2,51 @@ const express = require('express');
 const router = express.Router();
 const authenticateToken = require('../middleware/authenticateToken');
 const authorizeRoles = require('../middleware/authorizeRoles');
+const requireResearchMode = require('../middleware/requireResearchMode');
 const WorkloadProfileManager = require('../research/WorkloadProfileManager');
+const researchController = require('../controllers/research.controller');
 
-/**
- * GET /api/research/workload-profiles
- * Get all available workload profiles
- */
-router.get('/workload-profiles', authenticateToken, (req, res) => {
-  try {
-    const profiles = WorkloadProfileManager.getProfiles();
-    res.json({ success: true, data: profiles });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
+router.use(authenticateToken, requireResearchMode, authorizeRoles('admin'));
+
+router.get('/workload-profiles', (req, res) => {
+  res.json({ success: true, data: WorkloadProfileManager.getProfiles() });
 });
 
-/**
- * GET /api/research/workload-profiles/:profileId
- * Get a specific workload profile
- */
-router.get('/workload-profiles/:profileId', authenticateToken, (req, res) => {
-  try {
-    const profile = WorkloadProfileManager.getProfile(req.params.profileId);
-    if (!profile) {
-      return res.status(404).json({ success: false, message: 'Workload profile not found' });
-    }
-    res.json({ success: true, data: profile });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+router.get('/workload-profiles/:profileId', (req, res) => {
+  const profile = WorkloadProfileManager.getProfile(req.params.profileId);
+  if (!profile) {
+    return res.status(404).json({ success: false, message: 'Workload profile not found' });
   }
+  res.json({ success: true, data: profile });
 });
 
-/**
- * POST /api/research/workload-profiles/validate
- * Validate a workload profile configuration
- */
-router.post('/workload-profiles/validate', authenticateToken, authorizeRoles('admin'), (req, res) => {
-  try {
-    const { profile } = req.body;
-    const result = WorkloadProfileManager.validateProfile(profile);
-    res.json({ success: true, data: result });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
+router.post('/workload-profiles/validate', (req, res) => {
+  const result = WorkloadProfileManager.validateProfile(req.body?.profile);
+  res.json({ success: true, data: result });
 });
 
-/**
- * POST /api/research/workload-profiles/generate
- * Generate a workload configuration from a profile
- */
-router.post('/workload-profiles/generate', authenticateToken, authorizeRoles('admin'), (req, res) => {
+router.post('/workload-profiles/generate', (req, res, next) => {
   try {
-    const { profileId, options = {} } = req.body;
-    const workload = WorkloadProfileManager.generateWorkload(profileId, options);
+    const workload = WorkloadProfileManager.generateWorkload(
+      req.body?.profileId,
+      req.body?.options || {}
+    );
     res.json({ success: true, data: workload });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    next(err);
   }
 });
+
+router.get('/scenarios', researchController.getScenarios);
+router.post('/conditions/apply', researchController.applyConditions);
+router.post('/conditions/clear', researchController.clearConditions);
+router.post('/conditions/failure', researchController.injectFailure);
+router.post('/conditions/restore', researchController.restoreNode);
+
+router.get('/experiments', researchController.listExperiments);
+router.post('/experiments/start', researchController.startExperiment);
+router.get('/experiments/:runId/status', researchController.getExperimentStatus);
+router.post('/experiments/:runId/abort', researchController.abortExperiment);
+router.get('/experiments/:runId/export', researchController.exportExperiment);
 
 module.exports = router;

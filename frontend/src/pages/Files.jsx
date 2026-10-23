@@ -19,7 +19,10 @@ const Files = () => {
 
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState(null);
 
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
   const [searchQuery, setSearchQuery] = useState('');
@@ -33,6 +36,7 @@ const Files = () => {
 
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [limits, setLimits] = useState(null);
   const fileInputRef = useRef(null);
 
   // Close menus on outside click
@@ -43,17 +47,21 @@ const Files = () => {
   }, []);
 
   // Fetch files
-  const fetchFiles = useCallback(async (signal) => {
+  const fetchFiles = useCallback(async (signal, { page: nextPage = 1, append = false } = {}) => {
     try {
-      setLoading(true);
+      if (append) setLoadingMore(true);
+      else setLoading(true);
       setError(null);
-      const data = await fileService.getFiles({ signal });
-      setFiles(data);
+      const result = await fileService.getFilesPage({ signal, page: nextPage, limit: 48 });
+      setFiles(prev => (append ? [...prev, ...result.data] : result.data));
+      setPagination(result.pagination);
+      setPage(nextPage);
     } catch (err) {
       if (err.name === 'CanceledError' || err.code === 'ERR_CANCELED') return;
       setError('Failed to fetch files. Please try again.');
     } finally {
-      setLoading(false);
+      if (append) setLoadingMore(false);
+      else setLoading(false);
     }
   }, []);
 
@@ -62,6 +70,19 @@ const Files = () => {
     fetchFiles(controller.signal);
     return () => controller.abort();
   }, [fetchFiles]);
+
+  const handleLoadMore = () => {
+    if (!pagination || page >= pagination.pages || loadingMore) return;
+    fetchFiles(undefined, { page: page + 1, append: true });
+  };
+
+  useEffect(() => {
+    let active = true;
+    fileService.getUploadLimits().then((data) => {
+      if (active) setLimits(data);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   // Debounce search
   useEffect(() => {
@@ -82,6 +103,11 @@ const Files = () => {
     // Reset input
     e.target.value = null;
 
+    if (limits?.maxOriginalFileSize && selectedFile.size > limits.maxOriginalFileSize) {
+      addToast(`File is too large. Maximum upload size is ${formatBytes(limits.maxOriginalFileSize)}.`, 'error');
+      return;
+    }
+
     setUploading(true);
     setUploadProgress(0);
 
@@ -96,7 +122,7 @@ const Files = () => {
         setUploadProgress(percentCompleted);
       });
       addToast('File uploaded successfully.', 'success');
-      fetchFiles();
+      fetchFiles(undefined, { page: 1 });
     } catch (err) {
       addToast(err.userMessage || 'Failed to upload file.', 'error');
     } finally {
@@ -171,7 +197,7 @@ const Files = () => {
     result.sort((a, b) => {
       if (sortBy === 'Name') return getFileDisplayName(a).localeCompare(getFileDisplayName(b));
       if (sortBy === 'Date Modified') return new Date(b.createdAt) - new Date(a.createdAt);
-      if (sortBy === 'Size') return (b.storedSize || b.size) - (a.storedSize || a.size);
+      if (sortBy === 'Size') return (b.originalSize || b.size) - (a.originalSize || a.size);
       return 0;
     });
 
@@ -296,7 +322,7 @@ const Files = () => {
             <div className="flex items-center justify-center gap-2 mt-1.5 text-xs text-gray-500">
               <span className="uppercase">{file.mimeType?.split('/')[1] || 'FILE'}</span>
               <span>•</span>
-              <span>{formatBytes(file.storedSize || file.size)}</span>
+              <span>{formatBytes(file.originalSize || file.size)}</span>
             </div>
             <div className="text-xs text-gray-400 mt-1">
               {formatDate(file.createdAt)}
@@ -376,7 +402,7 @@ const Files = () => {
                       {formatBytes(file.storedSize || file.size)}
                     </td>
                     <td className="px-4 py-3 text-gray-400">
-                      {formatBytes(file.size)}
+                      {formatBytes(file.originalSize || file.size)}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {file.compressionApplied ? (
@@ -466,7 +492,10 @@ const Files = () => {
           <div>
             <h1 className="text-2xl font-bold text-gray-800">My Files</h1>
             <p className="text-sm text-gray-500 mt-1">
-              {loading ? 'Loading...' : `${files.length} file${files.length !== 1 ? 's' : ''}`}
+              {loading
+                ? 'Loading...'
+                : `${pagination?.total ?? files.length} file${(pagination?.total ?? files.length) !== 1 ? 's' : ''}${pagination && files.length < pagination.total ? ` (${files.length} shown)` : ''}`}
+              {limits?.maxOriginalFileSize ? ` \u00b7 max ${formatBytes(limits.maxOriginalFileSize)} per file` : ''}
             </p>
           </div>
           
@@ -584,6 +613,18 @@ const Files = () => {
           </div>
         ) : (
           renderListView()
+        )}
+
+        {!loading && pagination && page < pagination.pages && (
+          <div className="flex justify-center mt-6">
+            <button
+              onClick={handleLoadMore}
+              disabled={loadingMore}
+              className="px-5 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-sm disabled:opacity-60"
+            >
+              {loadingMore ? 'Loading...' : 'Load more files'}
+            </button>
+          </div>
         )}
       </div>
 

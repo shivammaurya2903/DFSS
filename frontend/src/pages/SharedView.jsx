@@ -3,6 +3,8 @@ import { useParams, Link } from 'react-router-dom';
 import { Download, AlertCircle, Cloud, Loader, Clock } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
+const MAX_PREVIEW_BYTES = 25 * 1024 * 1024;
+
 const SharedView = () => {
   const { token } = useParams();
   const { addToast } = useToast();
@@ -38,6 +40,14 @@ const SharedView = () => {
     
     loadSharedData();
   }, [token]);
+
+  useEffect(() => {
+    return () => {
+      if (previewContent && typeof previewContent === 'string' && previewContent.startsWith('blob:')) {
+        window.URL.revokeObjectURL(previewContent);
+      }
+    };
+  }, [previewContent]);
 
   const handleDownload = async () => {
     try {
@@ -77,6 +87,10 @@ const SharedView = () => {
   };
 
   const handlePreview = async () => {
+    if ((file?.size || 0) > MAX_PREVIEW_BYTES) {
+      addToast('This file is too large to preview. Download it instead.', 'error');
+      return;
+    }
     try {
       setPreviewLoading(true);
       const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
@@ -188,8 +202,8 @@ const SharedView = () => {
               </h2>
               
               <div className="flex flex-wrap items-center justify-center gap-3 text-sm text-gray-600 mb-8 bg-gray-50 py-2.5 px-4 rounded-xl inline-flex mx-auto">
-                {file.size && <span className="font-medium">{formatBytes(file.size)}</span>}
-                {file.size && mime && <span className="text-gray-300">•</span>}
+                {(file.originalSize || file.size) && <span className="font-medium">{formatBytes(file.originalSize || file.size)}</span>}
+                {(file.originalSize || file.size) && mime && <span className="text-gray-300">•</span>}
                 {mime && <span className="uppercase text-xs font-bold tracking-wider">{mime.split('/')[1] || mime}</span>}
               </div>
 
@@ -197,10 +211,11 @@ const SharedView = () => {
                 {isPreviewable(mime) && !previewContent && (
                   <button 
                     onClick={handlePreview}
-                    disabled={previewLoading}
-                    className="flex-1 py-3 px-6 bg-white border-2 border-gray-100 text-gray-700 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-gray-50 hover:border-gray-200 transition-all disabled:opacity-70"
+                    disabled={previewLoading || (file.originalSize || file.size || 0) > MAX_PREVIEW_BYTES}
+                    title={(file.originalSize || file.size || 0) > MAX_PREVIEW_BYTES ? 'Preview limited to 25 MB' : undefined}
+                    className="flex-1 py-3 px-6 bg-white border-2 border-gray-100 text-gray-700 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-gray-50 hover:border-gray-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {previewLoading ? <Loader className="w-5 h-5 animate-spin" /> : 'Preview'}
+                    {previewLoading ? <Loader className="w-5 h-5 animate-spin" /> : (file.originalSize || file.size || 0) > MAX_PREVIEW_BYTES ? 'Preview unavailable' : 'Preview'}
                   </button>
                 )}
                 

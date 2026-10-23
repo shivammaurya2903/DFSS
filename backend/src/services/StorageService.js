@@ -19,7 +19,7 @@ const StorageService = {
    * @param {string} nodeUrl   - Storage node base URL (e.g., http://localhost:5001)
    * @param {string} chunkId   - Unique chunk identifier
    * @param {Buffer} data      - Encrypted chunk data
-   * @param {string} checksum  - SHA-256 checksum of raw (pre-encryption) chunk data
+   * @param {string} checksum  - SHA-256 checksum of the encrypted bytes being sent
    * @returns {Promise<{success: boolean, chunkId: string}>}
    */
   async writeChunk(nodeUrl, chunkId, data, checksum) {

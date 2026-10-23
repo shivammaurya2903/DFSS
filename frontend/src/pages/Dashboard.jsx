@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import PageContainer from '../components/layout/PageContainer';
 import * as fileService from '../services/file.service';
-import * as activityService from '../services/activity.service';
+import useActivity from '../hooks/useActivity';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { formatBytes, formatDate, formatRelativeTime, getFileDisplayName } from '../utils/formatters';
@@ -19,17 +19,25 @@ const Dashboard = () => {
   const { addToast } = useToast();
   
   const [files, setFiles] = useState([]);
-  const [activities, setActivities] = useState([]);
   const [loadingFiles, setLoadingFiles] = useState(true);
-  const [loadingActivities, setLoadingActivities] = useState(true);
+  const { activities, loading: loadingActivities, refresh: refreshActivities } = useActivity({ limit: 5 });
   
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState(null);
+  const [limits, setLimits] = useState(null);
   const fileInputRef = useRef(null);
   
   const [actionMenuOpen, setActionMenuOpen] = useState(null);
   const [shareFile, setShareFile] = useState(null);
   const [sharesCount, setSharesCount] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    fileService.getUploadLimits()
+      .then((data) => { if (active) setLimits(data); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -52,18 +60,6 @@ const Dashboard = () => {
       } catch (err) {
         // Ignore silent cancellation
       }
-
-      try {
-        const result = await activityService.getActivity({ signal: controller.signal });
-        const acts = result?.data || [];
-        setActivities(Array.isArray(acts) ? acts.slice(0, 5) : []);
-      } catch (err) {
-        if (err.name !== 'CanceledError') {
-          addToast('Failed to load recent activity', 'error');
-        }
-      } finally {
-        setLoadingActivities(false);
-      }
     };
     
     loadData();
@@ -81,6 +77,12 @@ const Dashboard = () => {
     const file = e.target.files[0];
     if (!file) return;
 
+    if (limits?.maxOriginalFileSize && file.size > limits.maxOriginalFileSize) {
+      addToast(`File is too large. Maximum upload size is ${formatBytes(limits.maxOriginalFileSize)}.`, 'error');
+      if (fileInputRef.current) fileInputRef.current.value = null;
+      return;
+    }
+
     try {
       setUploading(true);
       setUploadStatus({ statusText: 'Preparing...', progress: 0, fileName: file.name, loaded: 0, total: file.size });
@@ -89,7 +91,8 @@ const Dashboard = () => {
       formData.append('file', file);
 
       await fileService.uploadFile(formData, (progressEvent) => {
-        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        const total = progressEvent.total || file.size || 1;
+        const percentCompleted = Math.min(100, Math.round((progressEvent.loaded * 100) / total));
         setUploadStatus({
           statusText: percentCompleted < 100 ? 'Uploading...' : 'Processing...',
           progress: percentCompleted,
@@ -104,9 +107,7 @@ const Dashboard = () => {
       
       const newFiles = await fileService.getRecentFiles();
       setFiles(Array.isArray(newFiles) ? newFiles.slice(0, 5) : []);
-      const actsResult = await activityService.getActivity();
-      const acts = actsResult?.data || [];
-      setActivities(Array.isArray(acts) ? acts.slice(0, 5) : []);
+      await refreshActivities();
 
     } catch (err) {
       addToast(err.userMessage || err.message || 'Upload failed', 'error');
@@ -249,15 +250,22 @@ const Dashboard = () => {
           </div>
         </div>
         <div className="hidden md:block w-px h-16 bg-[#E7E9EF]"></div>
-        <div className="flex gap-4">
-          <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-3 w-20 h-20 rounded-xl bg-[#F5F7FB] hover:bg-[#E7E9EF] transition-colors text-[#17181C] group">
-            <Upload className="w-6 h-6 text-[#8178F2] mb-1 group-hover:-translate-y-1 transition-transform" />
-            <span className="text-xs font-medium">Upload</span>
-          </button>
-          <button onClick={() => navigate('/files')} className="flex flex-col items-center justify-center p-3 w-20 h-20 rounded-xl bg-[#F5F7FB] hover:bg-[#E7E9EF] transition-colors text-[#17181C] group">
-            <Folder className="w-6 h-6 text-[#6F737D] mb-1 group-hover:scale-110 transition-transform" />
-            <span className="text-xs font-medium">My Files</span>
-          </button>
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex gap-4">
+            <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-3 w-20 h-20 rounded-xl bg-[#F5F7FB] hover:bg-[#E7E9EF] transition-colors text-[#17181C] group">
+              <Upload className="w-6 h-6 text-[#8178F2] mb-1 group-hover:-translate-y-1 transition-transform" />
+              <span className="text-xs font-medium">Upload</span>
+            </button>
+            <button onClick={() => navigate('/files')} className="flex flex-col items-center justify-center p-3 w-20 h-20 rounded-xl bg-[#F5F7FB] hover:bg-[#E7E9EF] transition-colors text-[#17181C] group">
+              <Folder className="w-6 h-6 text-[#6F737D] mb-1 group-hover:scale-110 transition-transform" />
+              <span className="text-xs font-medium">My Files</span>
+            </button>
+          </div>
+          {limits?.maxOriginalFileSize && (
+            <span className="text-[10px] text-[#6F737D]">
+              Max {formatBytes(limits.maxOriginalFileSize)} per file
+            </span>
+          )}
         </div>
       </div>
 
@@ -302,7 +310,7 @@ const Dashboard = () => {
                           </div>
                         </td>
                         <td className="px-5 py-3 text-[#6F737D] whitespace-nowrap">
-                          {formatBytes(file.storedSize || file.size)}
+                          {formatBytes(file.originalSize || file.size)}
                         </td>
                         <td className="px-5 py-3 text-[#6F737D] whitespace-nowrap">{formatDate(file.updatedAt || file.createdAt)}</td>
                         <td className="px-5 py-3 whitespace-nowrap text-right">
@@ -351,7 +359,7 @@ const Dashboard = () => {
                     </div>
                     <div>
                       <p className="text-sm text-[#17181C]">{act.action}</p>
-                      <p className="text-xs text-[#6F737D] mt-0.5">{formatRelativeTime(act.createdAt || act.date)}</p>
+                      <p className="text-xs text-[#6F737D] mt-0.5">{formatRelativeTime(act.timestamp || act.createdAt || act.date)}</p>
                     </div>
                   </div>
                 ))}

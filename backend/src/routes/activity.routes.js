@@ -14,7 +14,11 @@ router.get('/', authenticateToken, async (req, res, next) => {
     const skip  = (page - 1) * limit;
 
     const filter = { userId: req.user.id };
-    if (req.query.action) filter.action = req.query.action;
+    if (req.query.action === 'DELETE') {
+      filter.action = { $in: ['DELETE', 'FILE_DELETED'] };
+    } else if (req.query.action) {
+      filter.action = req.query.action;
+    }
 
     const [events, total] = await Promise.all([
       AuditLog.find(filter)
@@ -45,7 +49,11 @@ router.get('/admin', authenticateToken, authorizeRoles('admin'), async (req, res
     const skip  = (page - 1) * limit;
 
     const filter = {};
-    if (req.query.action) filter.action = req.query.action;
+    if (req.query.action === 'DELETE') {
+      filter.action = { $in: ['DELETE', 'FILE_DELETED'] };
+    } else if (req.query.action) {
+      filter.action = req.query.action;
+    }
     if (req.query.nodeId) filter.nodeId = req.query.nodeId;
 
     const [events, total] = await Promise.all([

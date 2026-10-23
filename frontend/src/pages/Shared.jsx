@@ -55,8 +55,11 @@ const Shared = () => {
 
   const handleCopyLink = (e, share) => {
     e.stopPropagation();
-    const shareUrl = `${window.location.origin}/share/${share.shareId}`;
-    navigator.clipboard.writeText(shareUrl)
+    if (!share.shareUrl) {
+      addToast('This legacy link can no longer be recovered. Revoke it and create a new link.', 'error');
+      return;
+    }
+    navigator.clipboard.writeText(share.shareUrl)
       .then(() => addToast('Link copied to clipboard', 'success'))
       .catch(() => addToast('Failed to copy link', 'error'));
   };
@@ -125,7 +128,7 @@ const Shared = () => {
               <tbody className="text-sm">
                 {shares.map(share => {
                   if (!share.file) return null;
-                  const isExpired = new Date(share.expiresAt) < new Date();
+                  const isExpired = share.isExpired ?? (share.expiresAt ? new Date(share.expiresAt) < new Date() : false);
                   
                   return (
                     <tr key={share.shareId} className="border-b border-[#F8F9FC] hover:bg-[#F8F9FC] cursor-pointer group" onClick={() => navigate(`/files/${share.file._id}/view`)}>
@@ -148,13 +151,14 @@ const Shared = () => {
                         )}
                       </td>
                       <td className="px-5 py-4 text-[#6F737D] whitespace-nowrap">
-                        {formatDate(share.expiresAt)}
+                        {share.expiresAt ? formatDate(share.expiresAt) : 'Never'}
                       </td>
                       <td className="px-5 py-4 whitespace-nowrap text-right">
                         <div className="flex items-center justify-end gap-2">
                           <button 
                             onClick={(e) => handleCopyLink(e, share)} 
-                            className="p-2 text-[#6F737D] hover:text-[#8178F2] hover:bg-[#F5F7FB] rounded-lg transition-colors flex items-center gap-1 border border-transparent hover:border-[#E7E9EF]"
+                            disabled={!share.linkAvailable}
+                            className="p-2 text-[#6F737D] hover:text-[#8178F2] hover:bg-[#F5F7FB] rounded-lg transition-colors flex items-center gap-1 border border-transparent hover:border-[#E7E9EF] disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             <Copy className="w-4 h-4" />
                             <span className="text-xs font-medium hidden sm:inline">Copy Link</span>

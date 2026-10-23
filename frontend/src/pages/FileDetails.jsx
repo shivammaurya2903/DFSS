@@ -80,8 +80,10 @@ const FileDetails = () => {
   if (loading) return <div className="flex justify-center items-center h-full"><div className="animate-spin rounded-full h-8 w-8 border-b-2" style={{borderColor: '#8178F2'}}></div></div>;
   if (error || !file) return <div className="p-8 text-center text-red-500">{error || 'File not found'}</div>;
 
-  const savedSpace = file.size - (file.storedSize || file.size);
-  const compressionRatio = file.size ? ((savedSpace / file.size) * 100).toFixed(1) : 0;
+  const originalSize = file.originalSize || file.size || 0;
+  const storedSize = file.storedSize || file.size || 0;
+  const savedSpace = originalSize - storedSize;
+  const compressionRatio = originalSize ? ((savedSpace / originalSize) * 100).toFixed(1) : 0;
 
   return (
     <div className="p-6 max-w-5xl mx-auto h-full overflow-auto bg-gray-50">
@@ -101,7 +103,7 @@ const FileDetails = () => {
           <div>
             <h1 className="text-2xl font-bold text-gray-800 mb-1 break-all">{file.filename}</h1>
             <div className="flex items-center gap-4 text-sm text-gray-500">
-              <span className="flex items-center gap-1"><HardDrive className="w-4 h-4" /> {formatSize(file.size)}</span>
+              <span className="flex items-center gap-1"><HardDrive className="w-4 h-4" /> {formatSize(originalSize)}</span>
               <span className="flex items-center gap-1"><Clock className="w-4 h-4" /> {formatDate(file.createdAt)}</span>
               <span className="bg-gray-100 px-2 py-0.5 rounded text-xs">{file.mimeType || 'Unknown type'}</span>
             </div>
@@ -140,11 +142,11 @@ const FileDetails = () => {
           <div className="space-y-4">
             <div className="flex justify-between items-center pb-3 border-b border-gray-100">
               <span className="text-gray-500">Original Size</span>
-              <span className="font-medium text-gray-800">{formatSize(file.size)}</span>
+              <span className="font-medium text-gray-800">{formatSize(originalSize)}</span>
             </div>
             <div className="flex justify-between items-center pb-3 border-b border-gray-100">
               <span className="text-gray-500">Stored Size</span>
-              <span className="font-medium text-gray-800">{formatSize(file.storedSize || file.size)}</span>
+              <span className="font-medium text-gray-800">{formatSize(storedSize)}</span>
             </div>
             <div className="flex justify-between items-center pb-3 border-b border-gray-100">
               <span className="text-gray-500">Space Saved</span>

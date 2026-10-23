@@ -35,3 +35,11 @@ export const fetchMe = async () => {
   }
   return response.data.user;
 };
+
+export const updateMe = async (payload) => {
+  const response = await api.patch('/auth/me', payload);
+  if (response.data.user) {
+    localStorage.setItem('user', JSON.stringify(response.data.user));
+  }
+  return response.data;
+};

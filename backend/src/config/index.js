@@ -1,4 +1,5 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
+const crypto = require('crypto');
 
 /**
  * Central configuration module.
@@ -65,6 +66,8 @@ module.exports = {
   replicationFactor: parseInt(process.env.REPLICATION_FACTOR || '2', 10),
   parallelDownloads: parseInt(process.env.PARALLEL_DOWNLOADS || '2', 10),
   maxOriginalFileSize: parseInt(process.env.MAX_ORIGINAL_FILE_SIZE_MB || '500', 10) * 1024 * 1024,
+  maxStoredFileSize: parseInt(process.env.MAX_STORED_FILE_SIZE_MB || process.env.MAX_ORIGINAL_FILE_SIZE_MB || '500', 10) * 1024 * 1024,
+  defaultStorageQuota: parseInt(process.env.DEFAULT_STORAGE_QUOTA_MB || '1024', 10) * 1024 * 1024,
 
   // Heartbeat
   heartbeatIntervalMs: parseInt(process.env.HEARTBEAT_INTERVAL_MS || '5000', 10),
@@ -78,6 +81,13 @@ module.exports = {
 
   // Internal API security
   internalApiSecret: internalApiSecret || (process.env.NODE_ENV !== 'production' ? 'CHANGE_THIS_INTERNAL_SECRET' : undefined),
+
+  // Share links: stable HMAC tokens let owners re-display links without
+  // storing plaintext capabilities. Rotating this secret revokes all links.
+  shareTokenSecret: process.env.SHARE_TOKEN_SECRET || crypto
+    .createHmac('sha256', 'dfss-share-token-v1')
+    .update(`${internalApiSecret || 'dev'}:${jwtSecret || 'dev'}`)
+    .digest('hex'),
 
   // Logging
   logLevel: process.env.LOG_LEVEL || 'info',

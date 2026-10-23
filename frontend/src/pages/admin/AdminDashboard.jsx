@@ -21,50 +21,58 @@ const StatCard = ({ title, value, icon: Icon, colorClass, subtitle }) => (
 
 const AdminDashboard = () => {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [activityError, setActivityError] = useState(false);
+  const [metricsError, setMetricsError] = useState(false);
   const [metrics, setMetrics] = useState({ totalUsers: 0, totalFiles: 0, totalStorage: 0 });
   const [nodes, setNodes] = useState([]);
   const [activities, setActivities] = useState([]);
   const { addToast } = useToast();
 
-  useEffect(() => {
-    const fetchAdminData = async () => {
-      setLoading(true);
+  const fetchAdminData = async () => {
+    setLoading(true);
+    setError(null);
+    setActivityError(false);
+    setMetricsError(false);
+    try {
+      const nodesData = await nodeService.getNodes();
+      setNodes(nodesData);
+
       try {
-        // Fetch Nodes
-        const nodesData = await nodeService.getNodes();
-        setNodes(nodesData);
-
-        // Fetch Activities
-        try {
-          const actData = await activityService.getAdminActivity({ limit: 5 });
-          setActivities(actData?.data || actData?.activities || []);
-        } catch (err) {
-          console.error("Failed to load admin activity:", err);
-        }
-
-        // Fetch Metrics (might return 404/403 if not implemented on backend)
-        try {
-          const metricsRes = await api.get('/storage/admin/metrics');
-          if (metricsRes.data?.data) {
-            setMetrics(metricsRes.data.data);
-          }
-        } catch (err) {
-          console.warn("Metrics endpoint not available", err);
-        }
-
+        const actData = await activityService.getAdminActivity({ limit: 5 });
+        setActivities(actData?.data || actData?.activities || []);
       } catch (err) {
-        addToast("Failed to load some dashboard data.", "error");
-      } finally {
-        setLoading(false);
+        console.error("Failed to load admin activity:", err);
+        setActivityError(true);
       }
-    };
 
+      try {
+        const metricsRes = await api.get('/storage/admin/metrics');
+        if (metricsRes.data?.data) {
+          setMetrics(metricsRes.data.data);
+        } else {
+          setMetricsError(true);
+        }
+      } catch (err) {
+        console.warn("Metrics endpoint not available", err);
+        setMetricsError(true);
+      }
+    } catch (err) {
+      console.error("Failed to load admin dashboard:", err);
+      setError(err.response?.data?.message || "Failed to load dashboard data.");
+      addToast("Failed to load some dashboard data.", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchAdminData();
   }, [addToast]);
 
   const healthyNodes = nodes.filter(n => n.status === 'HEALTHY').length;
   const degradedNodes = nodes.filter(n => n.status === 'DEGRADED').length;
-  const offlineNodes = nodes.filter(n => n.status === 'DOWN').length;
+  const offlineNodes = nodes.filter(n => ['OFFLINE', 'DOWN'].includes(n.status)).length;
 
   const formatBytes = (bytes) => {
     if (!bytes) return '0 B';
@@ -88,16 +96,34 @@ const AdminDashboard = () => {
         </div>
       </div>
 
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <span className="text-sm">{error}</span>
+          <button
+            onClick={fetchAdminData}
+            className="px-3 py-1.5 bg-white border border-red-200 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {metricsError && !error && (
+        <div className="bg-orange-50 border border-orange-200 text-orange-700 rounded-xl p-3 text-sm">
+          Live metrics are temporarily unavailable. Node and activity data are still shown.
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard 
           title="Total Users" 
-          value={metrics.totalUsers || 'N/A'} 
+          value={metrics.totalUsers ?? 'N/A'} 
           icon={Users} 
           colorClass="bg-blue-50 text-blue-500" 
         />
         <StatCard 
           title="Total Files" 
-          value={metrics.totalFiles || 'N/A'} 
+          value={metrics.totalFiles ?? 'N/A'} 
           icon={FileText} 
           colorClass="bg-green-50 text-green-500" 
         />
@@ -128,11 +154,11 @@ const AdminDashboard = () => {
               <div className="text-gray-500 text-sm text-center py-4">No nodes available</div>
             ) : (
               nodes.slice(0, 5).map(node => (
-                <div key={node.id || node._id} className="flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:bg-gray-50 transition-colors">
+                <div key={node.nodeId || node._id} className="flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:bg-gray-50 transition-colors">
                   <div className="flex items-center gap-3">
-                    <div className={`w-2.5 h-2.5 rounded-full ${node.status === 'HEALTHY' ? 'bg-emerald-500' : (node.status === 'DEGRADED' ? 'bg-orange-500' : 'bg-red-500')}`}></div>
+                    <div className={`w-2.5 h-2.5 rounded-full ${node.status === 'HEALTHY' ? 'bg-emerald-500' : (node.status === 'DEGRADED' ? 'bg-orange-500' : 'bg-red-500')}`} title={node.status}></div>
                     <div>
-                      <div className="text-sm font-medium text-gray-800">{node.name || node.nodeId || node.id}</div>
+                      <div className="text-sm font-medium text-gray-800">{node.name || node.nodeId || node._id}</div>
                       <div className="text-xs text-gray-500">{formatBytes(node.usedSpace || 0)} / {formatBytes(node.capacity || node.totalSpace || 0)}</div>
                     </div>
                   </div>
@@ -152,13 +178,18 @@ const AdminDashboard = () => {
             <Link to="/admin/activity" className="text-sm text-[#8178F2] hover:underline">View All</Link>
           </div>
           <div className="p-4 space-y-3 flex-1 overflow-y-auto max-h-80">
-            {activities.length === 0 ? (
+            {activityError ? (
+              <div className="text-red-600 text-sm text-center py-4">
+                Failed to load recent activity.
+                <button onClick={fetchAdminData} className="ml-2 underline">Retry</button>
+              </div>
+            ) : activities.length === 0 ? (
               <div className="text-gray-500 text-sm text-center py-4">No recent activity</div>
             ) : (
               activities.map((act, i) => (
                 <div key={act._id || i} className="flex gap-3 text-sm p-2 border-b border-gray-50 last:border-0">
                   <div className="text-[#8178F2] font-medium min-w-[80px]">{act.action}</div>
-                  <div className="text-gray-600 truncate flex-1">{act.details?.filename || act.fileId || "System Event"}</div>
+                  <div className="text-gray-600 truncate flex-1">{act.metadata?.filename || act.fileId || "System Event"}</div>
                   <div className="text-gray-400 text-xs whitespace-nowrap">
                     {new Date(act.timestamp || act.createdAt || act.date || Date.now()).toLocaleDateString()}
                   </div>

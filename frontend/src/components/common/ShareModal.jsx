@@ -45,7 +45,7 @@ const ShareModal = ({ file, onClose }) => {
     
     try {
       await fileService.revokeShare(file._id, shareId);
-      setShares(shares.filter(s => s._id !== shareId));
+      setShares(shares.filter(s => s.shareId !== shareId));
       addToast('Share link revoked successfully', 'success');
     } catch (err) {
       setError('Failed to revoke share link');
@@ -53,13 +53,19 @@ const ShareModal = ({ file, onClose }) => {
   };
 
   const copyToClipboard = (url, id) => {
+    if (!url) {
+      addToast('This legacy link can no longer be recovered. Revoke it and create a new link.', 'error');
+      return;
+    }
     navigator.clipboard.writeText(url);
     setCopied(id);
     setTimeout(() => setCopied(null), 2000);
   };
 
-  const getShareUrl = (token) => {
-    return `${window.location.origin}/shared/${token}`;
+  const getShareUrl = (share) => {
+    if (share.shareUrl) return share.shareUrl;
+    if (share.token) return `${window.location.origin}/shared/${share.token}`;
+    return null;
   };
 
   return (
@@ -119,11 +125,11 @@ const ShareModal = ({ file, onClose }) => {
             {shares.length > 0 ? (
               <div className="space-y-3">
                 {shares.map((share) => {
-                  const shareUrl = getShareUrl(share.token);
-                  const isExpired = share.expiresAt && new Date(share.expiresAt) < new Date();
+                  const shareUrl = getShareUrl(share);
+                  const isExpired = share.isExpired ?? (share.expiresAt ? new Date(share.expiresAt) < new Date() : false);
                   
                   return (
-                    <div key={share._id} className="p-3.5 border border-gray-100 rounded-xl bg-white shadow-sm flex flex-col gap-3">
+                    <div key={share.shareId} className="p-3.5 border border-gray-100 rounded-xl bg-white shadow-sm flex flex-col gap-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full uppercase tracking-wider ${isExpired ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
@@ -135,7 +141,7 @@ const ShareModal = ({ file, onClose }) => {
                           </span>
                         </div>
                         <button 
-                          onClick={() => handleRevoke(share._id)}
+                          onClick={() => handleRevoke(share.shareId)}
                           className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1 font-medium px-2 py-1 hover:bg-red-50 rounded transition-colors"
                         >
                           <Trash2 className="w-3.5 h-3.5" /> Revoke
@@ -146,21 +152,23 @@ const ShareModal = ({ file, onClose }) => {
                         <input 
                           type="text" 
                           readOnly 
-                          value={shareUrl}
+                          value={shareUrl || 'Link unavailable for legacy shares'}
                           className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-600 outline-none"
                         />
                         <button 
-                          onClick={() => copyToClipboard(shareUrl, share._id)}
-                          className="p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 transition-colors shadow-sm"
+                          onClick={() => copyToClipboard(shareUrl, share.shareId)}
+                          disabled={!shareUrl}
+                          className="p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
                           title="Copy Link"
                         >
-                          {copied === share._id ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                          {copied === share.shareId ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
                         </button>
                         <a 
-                          href={shareUrl}
+                          href={shareUrl || undefined}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="p-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 transition-colors shadow-sm"
+                          aria-disabled={!shareUrl}
+                          className={`p-2 bg-white border border-gray-200 rounded-lg transition-colors shadow-sm ${shareUrl ? 'hover:bg-gray-50 text-gray-600' : 'text-gray-300 pointer-events-none'}`}
                           title="Open Link"
                         >
                           <ExternalLink className="w-4 h-4" />
