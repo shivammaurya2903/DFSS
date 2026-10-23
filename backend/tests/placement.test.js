@@ -1,3 +1,9 @@
+jest.mock('../src/models/StorageNode');
+jest.mock('../src/models/PlacementDecision');
+
+const StorageNode = require('../src/models/StorageNode');
+const PlacementDecision = require('../src/models/PlacementDecision');
+const PlacementPolicyManager = require('../src/placement/PlacementPolicyManager');
 const strategy = require('../src/placement/PerformanceSecurityStrategy');
 
 const node = (overrides) => ({
@@ -11,6 +17,10 @@ const node = (overrides) => ({
 });
 
 describe('PerformanceSecurityStrategy (A2)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
   test('excludes nodes that cannot store the file sensitivity', async () => {
     const result = await strategy.selectNodes({
       file: { sensitivity: 'SENSITIVE', securityClass: 'HIGH' },
@@ -60,5 +70,35 @@ describe('PerformanceSecurityStrategy (A2)', () => {
 
     expect(result.primary.nodeId).toBe('idle');
     expect(result.metadata.reason).toMatch(/security eligibility/i);
+  });
+
+  test('PlacementPolicyManager routes A2 alias through production pipeline and records decision', async () => {
+    const testNodes = [
+      node({ nodeId: 'insecure', securityCapabilities: ['PUBLIC'], freeSpace: 20 * 1024 * 1024, currentLoad: 0.01 }),
+      node({ nodeId: 'secure-1', securityCapabilities: ['SENSITIVE'], freeSpace: 20 * 1024 * 1024, currentLoad: 0.1 }),
+      node({ nodeId: 'secure-2', securityCapabilities: ['SENSITIVE'], freeSpace: 20 * 1024 * 1024, currentLoad: 0.2 }),
+    ];
+    StorageNode.find.mockResolvedValue(testNodes);
+    PlacementDecision.create.mockImplementation((doc) => Promise.resolve(doc));
+
+    const result = await PlacementPolicyManager.place({
+      file: { _id: 'file-123', placementPolicy: 'A2', sensitivity: 'SENSITIVE' },
+      chunkId: 'file-123_0',
+      chunkSize: 1024,
+      replicationFactor: 2,
+      runId: 'run-a2',
+      scenarioId: 'scen-a2',
+    });
+
+    expect(result.primary.nodeId).toBe('secure-1');
+    expect(result.replicas.map(r => r.nodeId)).toEqual(['secure-2']);
+    expect(PlacementDecision.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        strategy: 'PERFORMANCE_SECURITY',
+        runId: 'run-a2',
+        scenarioId: 'scen-a2',
+        selectedPrimary: 'secure-1',
+      })
+    );
   });
 });

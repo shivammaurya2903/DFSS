@@ -1,7 +1,11 @@
+jest.mock('../src/models/User');
+
 const jwt = require('jsonwebtoken');
 const config = require('../src/config');
+const User = require('../src/models/User');
 const authenticateToken = require('../src/middleware/authenticateToken');
 const rateLimit = require('../src/middleware/rateLimit');
+const { updateMe } = require('../src/controllers/authController');
 
 function mockResponse() {
   return {
@@ -61,5 +65,53 @@ describe('rateLimit', () => {
     expect(third.statusCode).toBe(429);
     expect(third.body.code).toBe('RATE_LIMITED');
     expect(third.headers['Retry-After']).toBeDefined();
+  });
+});
+
+describe('updateMe (ISS-039)', () => {
+  test('updates user name and persists profile', async () => {
+    const mockUser = {
+      _id: 'user-1',
+      name: 'Old Name',
+      email: 'user@example.com',
+      save: jest.fn().mockResolvedValue(true),
+    };
+    User.findById.mockReturnValue({
+      select: jest.fn().mockResolvedValue(mockUser),
+    });
+
+    const req = { user: { userId: 'user-1' }, body: { name: 'New Name' } };
+    const res = mockResponse();
+
+    await updateMe(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(mockUser.name).toBe('New Name');
+    expect(mockUser.save).toHaveBeenCalled();
+  });
+
+  test('rejects password change if currentPassword is missing or incorrect', async () => {
+    const mockUser = {
+      _id: 'user-1',
+      name: 'User One',
+      email: 'user@example.com',
+      comparePassword: jest.fn().mockResolvedValue(false),
+      save: jest.fn().mockResolvedValue(true),
+    };
+    User.findById.mockReturnValue({
+      select: jest.fn().mockResolvedValue(mockUser),
+    });
+
+    // Missing currentPassword
+    const req1 = { user: { userId: 'user-1' }, body: { newPassword: 'newSecretPassword123' } };
+    const res1 = mockResponse();
+    await updateMe(req1, res1);
+    expect(res1.statusCode).toBe(400);
+
+    // Incorrect currentPassword
+    const req2 = { user: { userId: 'user-1' }, body: { currentPassword: 'wrongPassword', newPassword: 'newSecretPassword123' } };
+    const res2 = mockResponse();
+    await updateMe(req2, res2);
+    expect(res2.statusCode).toBe(401);
   });
 });

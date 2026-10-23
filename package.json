@@ -14,6 +14,7 @@
     "build": "npm run build --prefix frontend",
     "test": "npm test --prefix backend -- --runInBand",
     "test:frontend": "npm test --prefix frontend",
+    "test:smoke": "node tests/e2e/smoke-test.js",
     "test:all": "npm test && npm run test:frontend",
     "create-admin": "node scripts/create-admin.js"
   }

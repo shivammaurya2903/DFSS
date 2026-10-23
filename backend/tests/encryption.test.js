@@ -3,6 +3,9 @@ const {
   buildEncryptionInfo,
   getFileKey,
   getLegacyKey,
+  getMasterKey,
+  unwrapFileKey,
+  rewrapFileKey,
   encryptChunk,
   decryptChunk,
   sha256,
@@ -35,5 +38,34 @@ describe('encryption utilities', () => {
 
     expect(sha256(encrypted)).not.toBe(sha256(plaintext));
     expect(decryptChunk(encrypted, dataKey)).toEqual(plaintext);
+  });
+
+  test('fails decryption when wrapped key auth tag is tampered', () => {
+    const { encryptionInfo } = buildEncryptionInfo();
+    const tamperedTag = Buffer.from(encryptionInfo.wrapTag, 'base64');
+    tamperedTag[0] ^= 0xff; // corrupt tag
+    const tampered = { ...encryptionInfo, wrapTag: tamperedTag.toString('base64') };
+
+    expect(() => getFileKey({ encryptionInfo: tampered })).toThrow();
+  });
+
+  test('supports key rotation / re-wrapping with a new master key without modifying chunk ciphertext', () => {
+    const plaintext = Buffer.from('chunk data before rotation');
+    const oldMaster = getMasterKey();
+    const newMaster = crypto.randomBytes(32);
+
+    const { dataKey, encryptionInfo } = buildEncryptionInfo();
+    const encryptedChunk = encryptChunk(plaintext, dataKey);
+
+    // Re-wrap with new master key
+    const rotatedInfo = rewrapFileKey(encryptionInfo, oldMaster, newMaster);
+    expect(rotatedInfo.wrappedKey).not.toBe(encryptionInfo.wrappedKey);
+
+    // Unwrap using new master key yields original dataKey
+    const unwrappedDataKey = unwrapFileKey(rotatedInfo, newMaster);
+    expect(unwrappedDataKey.equals(dataKey)).toBe(true);
+
+    // The existing encryptedChunk is still decrypted by the unwrapped data key
+    expect(decryptChunk(encryptedChunk, unwrappedDataKey)).toEqual(plaintext);
   });
 });

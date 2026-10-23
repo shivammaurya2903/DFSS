@@ -20,10 +20,14 @@ const config = require('../config');
  */
 
 const strategyMap = {
-  ROUND_ROBIN:         roundRobin,
-  PERFORMANCE_AWARE:   performanceAware,
+  ROUND_ROBIN:          roundRobin,
+  A0:                   roundRobin,
+  PERFORMANCE_AWARE:    performanceAware,
+  A1:                   performanceAware,
   PERFORMANCE_SECURITY: performanceSecurity,
-  ADAPTIVE:            proposedAdaptive,
+  A2:                   performanceSecurity,
+  ADAPTIVE:             proposedAdaptive,
+  A3:                   proposedAdaptive,
 };
 
 const PlacementPolicyManager = {

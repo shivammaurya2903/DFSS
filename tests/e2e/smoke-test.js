@@ -183,6 +183,7 @@ async function run() {
     console.error('\n=== SMOKE TEST FAILED ===');
     console.error(err.response?.data || err.message);
     if (err.stack) console.error(err.stack);
+    process.exit(1);
   } finally {
     try { fs.unlinkSync(TEST_FILE_PATH); } catch (_) {}
   }

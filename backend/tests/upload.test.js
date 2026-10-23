@@ -95,6 +95,35 @@ describe('UploadCoordinator', () => {
     );
   });
 
+  test('incompressible 25 MB file produces 3 chunks at 10 MB chunk setting with 2 replicas per chunk', async () => {
+    const fileData = makeTempFile(25 * 1024 * 1024);
+
+    PlacementPolicyManager.place.mockResolvedValue({
+      primary: { nodeId: 'node-1', url: 'http://node-1' },
+      replicas: [
+        { nodeId: 'node-2', url: 'http://node-2' },
+        { nodeId: 'node-3', url: 'http://node-3' },
+      ],
+    });
+
+    const result = await UploadCoordinator.upload({
+      fileData,
+      userId: 'user-id',
+      requestId: 'request-id-25mb',
+      placementPolicy: 'ADAPTIVE',
+    });
+
+    expect(result.file.chunkCount).toBe(3);
+    expect(Chunk.create).toHaveBeenCalledTimes(3);
+    // 3 writes per chunk (1 primary + 2 replicas) * 3 chunks = 9 writes
+    expect(StorageService.writeChunk).toHaveBeenCalledTimes(9);
+
+    const chunkCalls = Chunk.create.mock.calls;
+    expect(chunkCalls[0][0].size).toBe(10 * 1024 * 1024);
+    expect(chunkCalls[1][0].size).toBe(10 * 1024 * 1024);
+    expect(chunkCalls[2][0].size).toBe(5 * 1024 * 1024);
+  });
+
   test('rejects oversized originals with HTTP 413 and leaves no files', async () => {
     const originalLimit = config.maxOriginalFileSize;
     config.maxOriginalFileSize = 1024;

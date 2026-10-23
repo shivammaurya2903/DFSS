@@ -258,9 +258,22 @@ class ProposedAdaptiveStrategy extends PlacementStrategy {
       domainWarning = 'Failure-domain diversity unavailable in current prototype.';
     }
 
+    const chosenReplicas = [best.replica];
+    if (replicationFactor > 2) {
+      const remainingEligible = eligible.filter(
+        n => n.nodeId !== best.primary.nodeId && n.nodeId !== best.replica.nodeId
+      );
+      remainingEligible.sort((a, b) => {
+        const scoreA = (a.freeSpace / normBounds.maxFreeSpace) * 0.4 + (1 - (a.currentLoad || 0)) * 0.4;
+        const scoreB = (b.freeSpace / normBounds.maxFreeSpace) * 0.4 + (1 - (b.currentLoad || 0)) * 0.4;
+        return scoreB - scoreA;
+      });
+      chosenReplicas.push(...remainingEligible.slice(0, replicationFactor - 2));
+    }
+
     return {
       primary: best.primary,
-      replicas: [best.replica],
+      replicas: chosenReplicas,
       decisionTimeMs,
       metadata: {
         domainWarning,

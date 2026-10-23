@@ -4,6 +4,7 @@ jest.mock('../src/models/StorageNode');
 jest.mock('../src/models/AuditLog');
 jest.mock('../src/services/StorageService');
 
+const crypto = require('crypto');
 const zlib = require('zlib');
 const File = require('../src/models/File');
 const Chunk = require('../src/models/Chunk');
@@ -161,6 +162,73 @@ describe('DownloadCoordinator streaming', () => {
 
     expect(AuditLog.create).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'DOWNLOAD', status: 'FAILURE' })
+    );
+  });
+
+  test('downloads and verifies integrity for multi-chunk 25 MB file (3 chunks: 10MB, 10MB, 5MB)', async () => {
+    const chunk0 = crypto.randomBytes(10 * 1024 * 1024);
+    const chunk1 = crypto.randomBytes(10 * 1024 * 1024);
+    const chunk2 = crypto.randomBytes(5 * 1024 * 1024);
+    const fullPayload = Buffer.concat([chunk0, chunk1, chunk2]);
+    const fullChecksum = sha256(fullPayload);
+
+    const { dataKey, encryptionInfo } = buildEncryptionInfo();
+    const encChunk0 = encryptChunk(chunk0, dataKey);
+    const encChunk1 = encryptChunk(chunk1, dataKey);
+    const encChunk2 = encryptChunk(chunk2, dataKey);
+
+    File.findOne.mockResolvedValue({
+      _id: 'file-25mb',
+      status: 'READY',
+      size: fullPayload.length,
+      storedSize: fullPayload.length,
+      originalSize: fullPayload.length,
+      checksum: fullChecksum,
+      originalSha256: fullChecksum,
+      originalFileName: 'incompressible-25mb.bin',
+      mimeType: 'application/octet-stream',
+      encryptionInfo,
+      compressionApplied: false,
+    });
+
+    Chunk.find.mockReturnValue({
+      sort: jest.fn().mockResolvedValue([
+        { chunkId: 'file-25mb_0', sequence: 0, checksum: sha256(chunk0), primaryNode: 'node-1', replicaNodes: ['node-2', 'node-3'] },
+        { chunkId: 'file-25mb_1', sequence: 1, checksum: sha256(chunk1), primaryNode: 'node-2', replicaNodes: ['node-3', 'node-4'] },
+        { chunkId: 'file-25mb_2', sequence: 2, checksum: sha256(chunk2), primaryNode: 'node-3', replicaNodes: ['node-4', 'node-1'] },
+      ]),
+    });
+
+    StorageNode.find.mockResolvedValue([
+      { nodeId: 'node-1', status: 'HEALTHY', url: 'http://node-1' },
+      { nodeId: 'node-2', status: 'HEALTHY', url: 'http://node-2' },
+      { nodeId: 'node-3', status: 'HEALTHY', url: 'http://node-3' },
+      { nodeId: 'node-4', status: 'HEALTHY', url: 'http://node-4' },
+    ]);
+
+    StorageService.readChunk.mockImplementation(async (url, chunkId) => {
+      if (chunkId === 'file-25mb_0') return encChunk0;
+      if (chunkId === 'file-25mb_1') return encChunk1;
+      if (chunkId === 'file-25mb_2') return encChunk2;
+      throw new Error(`Unknown chunk ${chunkId}`);
+    });
+
+    const { stream, contentLength } = await DownloadCoordinator.downloadStream({
+      fileId: 'file-25mb',
+      userId: 'user-1',
+      requestId: 'req-25mb-download',
+    });
+
+    const received = [];
+    for await (const part of stream) received.push(Buffer.from(part));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const assembled = Buffer.concat(received);
+    expect(assembled.length).toBe(25 * 1024 * 1024);
+    expect(sha256(assembled)).toBe(fullChecksum);
+    expect(contentLength).toBe(25 * 1024 * 1024);
+    expect(AuditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'DOWNLOAD', status: 'SUCCESS' })
     );
   });
 });

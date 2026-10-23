@@ -25,9 +25,9 @@ function generateFileKey() {
   return crypto.randomBytes(32);
 }
 
-function wrapFileKey(dataKey) {
+function wrapFileKey(dataKey, masterKey = getMasterKey()) {
   const wrapIv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', getMasterKey(), wrapIv);
+  const cipher = crypto.createCipheriv('aes-256-gcm', masterKey, wrapIv);
   const wrappedKey = Buffer.concat([cipher.update(dataKey), cipher.final()]);
   return {
     keyVersion: DATA_KEY_VERSION,
@@ -37,7 +37,7 @@ function wrapFileKey(dataKey) {
   };
 }
 
-function unwrapFileKey(encryptionInfo) {
+function unwrapFileKey(encryptionInfo, masterKey = getMasterKey()) {
   if (!encryptionInfo || encryptionInfo.keyVersion !== DATA_KEY_VERSION) {
     return getLegacyKey();
   }
@@ -50,7 +50,7 @@ function unwrapFileKey(encryptionInfo) {
 
   const decipher = crypto.createDecipheriv(
     'aes-256-gcm',
-    getMasterKey(),
+    masterKey,
     Buffer.from(encryptionInfo.wrapIv, 'base64')
   );
   decipher.setAuthTag(Buffer.from(encryptionInfo.wrapTag, 'base64'));
@@ -58,6 +58,15 @@ function unwrapFileKey(encryptionInfo) {
     decipher.update(Buffer.from(encryptionInfo.wrappedKey, 'base64')),
     decipher.final(),
   ]);
+}
+
+function rewrapFileKey(encryptionInfo, oldMasterKey, newMasterKey) {
+  const dataKey = unwrapFileKey(encryptionInfo, oldMasterKey);
+  const newWrapped = wrapFileKey(dataKey, newMasterKey);
+  return {
+    ...encryptionInfo,
+    ...newWrapped,
+  };
 }
 
 function getFileKey(file) {
@@ -103,6 +112,9 @@ module.exports = {
   getMasterKey,
   getLegacyKey,
   getFileKey,
+  wrapFileKey,
+  unwrapFileKey,
+  rewrapFileKey,
   buildEncryptionInfo,
   encryptChunk,
   decryptChunk,

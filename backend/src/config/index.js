@@ -36,9 +36,13 @@ module.exports = {
 
   // CORS
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
-  corsOrigins: process.env.CORS_ORIGINS
-    ? process.env.CORS_ORIGINS.split(',').map(o => o.trim())
-    : ['http://localhost:5173'],
+  corsOrigins: (() => {
+    const defaultOrigin = process.env.FRONTEND_URL || 'http://localhost:5173';
+    if (!process.env.CORS_ORIGINS) return [defaultOrigin];
+    const list = process.env.CORS_ORIGINS.split(',').map(o => o.trim());
+    if (!list.includes(defaultOrigin)) list.push(defaultOrigin);
+    return list;
+  })(),
 
   // JWT
   jwtSecret: jwtSecret || (process.env.NODE_ENV !== 'production' ? 'CHANGE_THIS_DEV_ONLY_SECRET' : undefined),
