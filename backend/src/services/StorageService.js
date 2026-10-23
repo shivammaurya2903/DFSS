@@ -162,6 +162,11 @@ const StorageService = {
    * Proactively checks their health and metrics to avoid UNKNOWN states.
    */
   async discoverNodes() {
+    const mongoose = require('mongoose');
+    if (mongoose.connection.readyState !== 1) {
+      console.warn('[StorageService] Skipping node discovery DB sync because MongoDB is not connected.');
+      return;
+    }
     const StorageNode = require('../models/StorageNode');
     console.log(`[StorageService] Discovering storage nodes from config...`);
     

@@ -64,10 +64,12 @@ module.exports = {
   chunkSizeBytes: parseInt(process.env.CHUNK_SIZE_MB || '10', 10) * 1024 * 1024,
   replicationFactor: parseInt(process.env.REPLICATION_FACTOR || '2', 10),
   parallelDownloads: parseInt(process.env.PARALLEL_DOWNLOADS || '2', 10),
+  maxOriginalFileSize: parseInt(process.env.MAX_ORIGINAL_FILE_SIZE_MB || '500', 10) * 1024 * 1024,
 
   // Heartbeat
   heartbeatIntervalMs: parseInt(process.env.HEARTBEAT_INTERVAL_MS || '5000', 10),
   heartbeatTimeoutMs: parseInt(process.env.HEARTBEAT_TIMEOUT_MS || '15000', 10),
+  heartbeatMissedThreshold: parseInt(process.env.HEARTBEAT_MISSED_THRESHOLD || '2', 10),
 
   // Storage request timeouts
   storageRequestTimeoutMs: parseInt(process.env.STORAGE_REQUEST_TIMEOUT_MS || '10000', 10),
@@ -87,6 +89,15 @@ module.exports = {
   latencyThresholdMs: parseInt(process.env.LATENCY_THRESHOLD_MS || '100', 10),
   capacityThresholdPercent: parseFloat(process.env.CAPACITY_THRESHOLD_PERCENT || '0.9'),
   minMigrationBenefitScore: parseFloat(process.env.MIN_MIGRATION_BENEFIT || '0.1'),
+
+  // Workload Profiles (for research experiments)
+  workloadProfiles: {
+    W1: { name: 'Write-Heavy', description: 'High write throughput, large sequential writes', writeRatio: 0.8, readRatio: 0.2, fileSizeDistribution: 'large', concurrency: 10 },
+    W2: { name: 'Read-Heavy', description: 'High read throughput, cached reads', writeRatio: 0.1, readRatio: 0.9, fileSizeDistribution: 'mixed', concurrency: 20 },
+    W3: { name: 'Mixed', description: 'Balanced read/write workload', writeRatio: 0.5, readRatio: 0.5, fileSizeDistribution: 'mixed', concurrency: 15 },
+    W4: { name: 'Small-File', description: 'Many small files (< 1MB)', writeRatio: 0.5, readRatio: 0.5, fileSizeDistribution: 'small', concurrency: 50 },
+    W5: { name: 'Large-File', description: 'Few large files (> 100MB)', writeRatio: 0.5, readRatio: 0.5, fileSizeDistribution: 'large', concurrency: 5 },
+  },
 
   // Placement weights (configurable for research)
   placementWeights: {

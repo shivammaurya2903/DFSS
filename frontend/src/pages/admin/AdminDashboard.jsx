@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { Users, HardDrive, FileText, Activity, AlertTriangle, ShieldCheck } from 'lucide-react';
 import * as nodeService from '../../services/node.service';
 import * as activityService from '../../services/activity.service';
@@ -120,14 +121,14 @@ const AdminDashboard = () => {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
           <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
             <h2 className="font-semibold text-gray-800">Storage Nodes</h2>
-            <a href="/admin/nodes" className="text-sm text-[#8178F2] hover:underline">View All</a>
+            <Link to="/admin/nodes" className="text-sm text-[#8178F2] hover:underline">View All</Link>
           </div>
           <div className="p-4 space-y-3 flex-1 overflow-y-auto max-h-80">
             {nodes.length === 0 ? (
               <div className="text-gray-500 text-sm text-center py-4">No nodes available</div>
             ) : (
               nodes.slice(0, 5).map(node => (
-                <div key={node.id} className="flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:bg-gray-50 transition-colors">
+                <div key={node.id || node._id} className="flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:bg-gray-50 transition-colors">
                   <div className="flex items-center gap-3">
                     <div className={`w-2.5 h-2.5 rounded-full ${node.status === 'HEALTHY' ? 'bg-emerald-500' : (node.status === 'DEGRADED' ? 'bg-orange-500' : 'bg-red-500')}`}></div>
                     <div>
@@ -148,7 +149,7 @@ const AdminDashboard = () => {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
           <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
             <h2 className="font-semibold text-gray-800">System Activity</h2>
-            <a href="/admin/activity" className="text-sm text-[#8178F2] hover:underline">View All</a>
+            <Link to="/admin/activity" className="text-sm text-[#8178F2] hover:underline">View All</Link>
           </div>
           <div className="p-4 space-y-3 flex-1 overflow-y-auto max-h-80">
             {activities.length === 0 ? (

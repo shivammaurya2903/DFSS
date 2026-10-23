@@ -71,8 +71,13 @@ export const getRecentFiles = async () => {
   return response.data?.data || [];
 };
 
-export const getSharedFiles = async () => {
-  const response = await api.get('/files/shared');
+export const getSharedFiles = async (options = {}) => {
+  const response = await api.get('/files/shared', options);
+  return response.data?.data || [];
+};
+
+export const getExpiredFiles = async (options = {}) => {
+  const response = await api.get('/files/expired', options);
   return response.data?.data || [];
 };
 
@@ -86,7 +91,7 @@ export const getFileShares = async (fileId) => {
   return response.data?.data || [];
 };
 
-export const revokeShare = async (fileId, token) => {
-  const response = await api.delete(`/files/${fileId}/share/${token}`);
+export const revokeShare = async (fileId, shareId) => {
+  const response = await api.delete(`/files/${fileId}/share/${shareId}`);
   return response.data;
 };

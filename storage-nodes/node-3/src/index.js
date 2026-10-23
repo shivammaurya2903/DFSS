@@ -55,7 +55,7 @@ app.use((req, res, next) => {
 // ─────────────────────────────────────────
 const authenticateInternal = (req, res, next) => {
   // Health endpoint is public for Docker healthchecks
-  if (req.path === '/internal/health') return next();
+  if (req.path === '/health') return next();
   
   const token = req.headers['x-internal-token'];
   if (!token || !INTERNAL_SECRET) {

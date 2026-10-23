@@ -32,7 +32,7 @@ const ShareModal = ({ file, onClose }) => {
       const response = await fileService.shareFile(file._id, expiresIn);
       const newShare = response?.data || response;
       setShares([...shares, newShare]);
-      addToast('success', 'Share link created successfully');
+      addToast('Share link created successfully', 'success');
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to create share link');
     } finally {
@@ -46,7 +46,7 @@ const ShareModal = ({ file, onClose }) => {
     try {
       await fileService.revokeShare(file._id, shareId);
       setShares(shares.filter(s => s._id !== shareId));
-      addToast('success', 'Share link revoked successfully');
+      addToast('Share link revoked successfully', 'success');
     } catch (err) {
       setError('Failed to revoke share link');
     }

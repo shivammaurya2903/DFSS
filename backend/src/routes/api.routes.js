@@ -5,6 +5,7 @@ const filesRoutes = require('./files.routes');
 const storageRoutes = require('./storage.routes');
 const activityRoutes = require('./activity.routes');
 const usersRoutes = require('./users.routes');
+const researchRoutes = require('./research.routes');
 const { getHealth } = require('../controllers/health.controller');
 
 // ─────────────────────────────────────────
@@ -34,4 +35,9 @@ router.use('/activity', activityRoutes);
 
 router.use('/users', usersRoutes);
 
-module.exports = router;
+  // ─────────────────────────────────────────
+  // Research (workload profiles, experiments)
+  // ─────────────────────────────────────────
+  router.use('/research', researchRoutes);
+
+  module.exports = router;

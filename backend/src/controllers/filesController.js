@@ -208,8 +208,24 @@ const createShare = async (req, res, next) => {
     }
 
     const { token, tokenHash } = ShareToken.generateToken();
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + (req.body.expiresInDays || 7));
+    let expiresAt = new Date();
+    const exp = req.body.expiresIn;
+    
+    if (exp === '1h') {
+      expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+    } else if (exp === '24h') {
+      expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    } else if (exp === '7d') {
+      expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    } else if (exp === '30d') {
+      expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    } else if (exp === 'never') {
+      expiresAt = new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000); // 100 years
+    } else if (req.body.expiresInDays) {
+      expiresAt.setDate(expiresAt.getDate() + req.body.expiresInDays);
+    } else {
+      expiresAt.setDate(expiresAt.getDate() + 7);
+    }
 
     const share = await ShareToken.create({
       fileId: file._id,
@@ -222,15 +238,26 @@ const createShare = async (req, res, next) => {
 
     const host = req.headers.host || 'localhost';
     const protocol = req.secure ? 'https' : 'http';
-    const shareUrl = `${protocol}://${host}/shared/link/${token}`;
+    const shareUrl = `${protocol}://${host}/shared/${token}`;
 
     res.status(201).json({
       success: true,
       data: {
         shareId: share._id,
+        _id: share._id,
         token,
+        tokenHash,
         shareUrl,
         expiresAt,
+        createdAt: share.createdAt,
+        file: {
+          _id: file._id,
+          filename: file.originalFileName || file.originalName || file.filename,
+          originalName: file.originalFileName || file.originalName || file.filename,
+          mimeType: file.originalMimeType || file.mimeType,
+          size: file.size,
+          storedSize: file.storedSize || file.size,
+        },
         fileName: file.originalFileName || file.originalName || file.filename,
       }
     });
@@ -250,7 +277,20 @@ const getFileShares = async (req, res, next) => {
 
 const revokeShare = async (req, res, next) => {
   try {
-    const share = await ShareToken.findOne({ _id: req.params.shareId, fileId: req.params.fileId, ownerId: req.user.id });
+    const param = req.params.shareId;
+    let share;
+    
+    // Check if param is a valid ObjectId (24 hex chars)
+    const isObjectId = /^[0-9a-fA-F]{24}$/.test(param);
+    
+    if (isObjectId) {
+      share = await ShareToken.findOne({ _id: param, fileId: req.params.fileId, ownerId: req.user.id });
+    } else {
+      // Treat as token - hash it and look up
+      const tokenHash = ShareToken.hashToken(param);
+      share = await ShareToken.findOne({ tokenHash, fileId: req.params.fileId, ownerId: req.user.id });
+    }
+    
     if (!share) {
       return res.status(404).json({ success: false, code: 'SHARE_NOT_FOUND', message: 'Share token not found' });
     }
@@ -353,21 +393,28 @@ const downloadSharedFile = async (req, res, next) => {
 };
 
 // ─────────────────────────────────────────
-// STUB ROUTES (to be implemented)
+// SHARED, FAVORITES, RECENT & EXPIRED
 // ─────────────────────────────────────────
 const getShared = async (req, res, next) => {
   try {
-    const shares = await ShareToken.find({ ownerId: req.user.id, status: 'active' }).populate('fileId');
-    // Group or map shares
-    const mapped = shares.map(share => ({
-      shareId: share._id,
-      token: 'hidden', // Token hash is in db, actual token is lost. Wait, backend only has tokenHash. 
-      // User can't see token again! They can only see the share ID, expiration, and file details.
-      file: share.fileId,
-      expiresAt: share.expiresAt,
-      views: share.views,
-      createdAt: share.createdAt
-    }));
+    const now = new Date();
+    const shares = await ShareToken.find({
+      ownerId: req.user.id,
+      revokedAt: null,
+      expiresAt: { $gt: now }
+    }).populate('fileId');
+
+    const mapped = shares
+      .filter(s => s.fileId != null)
+      .map(share => ({
+        shareId: share._id,
+        _id: share._id,
+        file: share.fileId,
+        expiresAt: share.expiresAt,
+        createdAt: share.createdAt,
+        sharedWithEmail: share.sharedWithEmail,
+        permission: share.permission,
+      }));
     res.json({ success: true, data: mapped });
   } catch (err) {
     next(err);
@@ -409,8 +456,35 @@ const getRecent = async (req, res) => {
   }
 };
 
-const getExpired = async (req, res) =>
-  res.json({ success: true, data: [], message: 'Expired shares not yet implemented' });
+const getExpired = async (req, res, next) => {
+  try {
+    const now = new Date();
+    const expiredShares = await ShareToken.find({
+      ownerId: req.user.id,
+      $or: [
+        { revokedAt: { $ne: null } },
+        { expiresAt: { $lte: now } }
+      ]
+    }).populate('fileId').sort({ updatedAt: -1 });
+
+    const mapped = expiredShares
+      .filter(s => s.fileId != null)
+      .map(share => ({
+        shareId: share._id,
+        _id: share._id,
+        file: share.fileId,
+        expiresAt: share.expiresAt,
+        revokedAt: share.revokedAt,
+        createdAt: share.createdAt,
+        isRevoked: !!share.revokedAt,
+        isExpired: share.expiresAt ? new Date(share.expiresAt) <= now : false
+      }));
+
+    res.json({ success: true, data: mapped });
+  } catch (err) {
+    next(err);
+  }
+};
 
 module.exports = {
   getFiles,

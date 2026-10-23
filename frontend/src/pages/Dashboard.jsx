@@ -29,6 +29,7 @@ const Dashboard = () => {
   
   const [actionMenuOpen, setActionMenuOpen] = useState(null);
   const [shareFile, setShareFile] = useState(null);
+  const [sharesCount, setSharesCount] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -43,6 +44,13 @@ const Dashboard = () => {
         }
       } finally {
         setLoadingFiles(false);
+      }
+
+      try {
+        const sharedData = await fileService.getSharedFiles({ signal: controller.signal });
+        setSharesCount(Array.isArray(sharedData) ? sharedData.length : 0);
+      } catch (err) {
+        // Ignore silent cancellation
       }
 
       try {
@@ -211,7 +219,7 @@ const Dashboard = () => {
           </div>
           <div>
             <p className="text-sm text-[#6F737D] font-medium">Active Shares</p>
-            <p className="text-xl font-bold text-[#17181C]">N/A</p>
+            <p className="text-xl font-bold text-[#17181C]">{sharesCount}</p>
           </div>
         </div>
         <div className="bg-white p-5 rounded-xl border border-[#E7E9EF] shadow-sm flex items-center gap-4">

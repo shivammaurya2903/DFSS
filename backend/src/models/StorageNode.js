@@ -77,6 +77,13 @@ const storageNodeSchema = new mongoose.Schema({
     default: Date.now,
   },
 
+  // Missed heartbeats counter for grace period
+  missedHeartbeats: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+
   // ============================================================
   // FAILURE DOMAIN
   // All current nodes share 'LOCAL-HDD'.

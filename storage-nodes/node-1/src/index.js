@@ -54,8 +54,9 @@ app.use((req, res, next) => {
 // This prevents unauthorized chunk access.
 // ─────────────────────────────────────────
 const authenticateInternal = (req, res, next) => {
-  // Health endpoint is public for Docker healthchecks
-  if (req.path === '/internal/health') return next();
+  // Health endpoint is public for Docker healthchecks and discovery
+  // Note: req.path is relative to mount point (/internal), so it's '/health'
+  if (req.path === '/health') return next();
   
   const token = req.headers['x-internal-token'];
   if (!token || !INTERNAL_SECRET) {

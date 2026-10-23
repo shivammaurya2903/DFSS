@@ -47,6 +47,15 @@ const UploadCoordinator = {
     timings.checksumTime = Date.now() - checksumStart;
 
     // ─────────────────────────────────────────
+    // ORIGINAL FILE SIZE VALIDATION
+    // ─────────────────────────────────────────
+    const maxOriginalSize = config.maxOriginalFileSize || 500 * 1024 * 1024; // 500 MB default
+    if (originalSize > maxOriginalSize) {
+      try { fs.unlinkSync(fileData.path); } catch (_) {}
+      throw Object.assign(new Error(`File exceeds maximum allowed original size of ${maxOriginalSize / (1024*1024)} MB.`), { code: 'ORIGINAL_FILE_LIMIT_EXCEEDED' });
+    }
+
+    // ─────────────────────────────────────────
     // COMPRESSION
     // ─────────────────────────────────────────
     let finalFileBuffer = originalFileBuffer;
